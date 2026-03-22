@@ -12,274 +12,285 @@
 
 ## 项目简介
 
-NASSAV 是一个基于 Python 开发的多源影视资源下载管理工具，支持从多个数据源自动下载、整理和刮削影视资源。
+NASSAV 是一个基于 Python 的多源影片下载与刮削工具。
 
-项目采用模块化设计，支持自定义下载器，并提供了完整的元数据管理功能和配套服务。
+这份仓库已经补齐 Windows 可用所需的关键兼容改造，当前在 `D:\22\NASSAV` 下已经实际跑通过：
+- `VEC-769`
+- `IPZZ-776`
 
-## 核心特性
+当前这套 Windows 方案的核心不是“纯 HTTP 抓站”，而是：
+- 常规请求能拿到页面时，直接解析下载
+- MissAV 遇到 Cloudflare 时，自动切换到 Playwright 浏览器模式获取真实详情页
+- 元数据优先从本地保存的 MissAV 页面解析，不再强依赖 JavBus
+- 下载完成后自动生成 `metadata.json`、`.nfo`、封面和预览图
 
-- 🎥 多源下载支持：支持 MissAV、Jable、HohoJ、Memo （持续添加中）等多个数据源
-- 📝 智能元数据管理：从JavBus自动获取影片信息、封面、海报等元数据
-- 🔄 队列管理：支持批量下载任务管理。使用sqlite去重，防止重复下载
-- 🌐 远程控制：提供 HTTP API 接口，支持远程控制下载任务
-- 🔒 文件锁机制：确保同一时间只有一个下载任务运行
-- 🎨 媒体服务器兼容：自动生成 NFO 文件，支持主流媒体服务器
+## 当前已完成的 Windows 兼容改造
 
-## Jellyfin预览
+- Python 下载链路改成跨平台调用，不再依赖 Unix `rm` 和 shell 拼接
+- `main.py` 支持 Windows 下直接传入车牌号参数
+- Go 后端不再写死 Linux 路径，改为读取 `cfg/configs.json`
+- 前端 API 地址和 API Key 改为 Vite 环境变量
+- 新增 `queue_runner.py` 作为跨平台批量任务入口
+- 新增 MissAV 浏览器回退脚本：`tools/missav_browser_fetch.mjs`
+- 新增浏览器配置项：`BrowserFallbackEnabled`、`BrowserProfilePath`、`SiteCookies`、`SiteHeaders`
 
-![](pic/1.png)
+## 目录结构
 
-## 系统要求
+```text
+NASSAV/
+├── backend/            # Go HTTP 服务
+├── cfg/                # 配置文件
+├── db/                 # sqlite 和下载队列
+├── frontend/           # Vue 前端
+├── src/                # Python 主逻辑
+├── tools/              # 辅助工具和浏览器抓取脚本
+├── videos/             # 下载输出目录
+├── main.py             # 单个下载入口
+├── metadata.py         # 批量补刮削入口
+├── queue_runner.py     # 跨平台队列执行器
+└── package.json        # Playwright 依赖
+```
 
-- **稳定的网络连接和代理服务**
-- Python 3.11.2 或更高版本
-- FFmpeg
-- Go 1.22.6 或更高版本（仅用于编译 HTTP 服务器）
+## 环境要求
 
-## 安装指南
+- Python 3.11+
+- Node.js 18+
+- Go 1.22+
+- 可用代理
+- Windows 10/11
 
-1. 克隆项目并安装依赖：
-```bash
+说明：
+- 仓库已优先支持 Windows 本地运行。
+- `backend` 使用 `github.com/mattn/go-sqlite3`，在 Windows 上编译时可能需要 MinGW / MSYS2 / GCC。
+- 仓库内如存在 `tools/ffmpeg.exe`、`tools/m3u8-Downloader-Go.exe`，会优先使用本地工具；否则也可走系统 PATH。
+
+## 快速开始
+
+### 1. 克隆项目
+
+```powershell
 git clone https://github.com/Satoing/NASSAV.git
 cd NASSAV
-pip3 install -r requirements.txt
 ```
 
-2. 安装 FFmpeg：
-```bash
-sudo apt install ffmpeg
+### 2. 安装 Python 依赖
+
+```powershell
+pip install -r requirements.txt
 ```
 
-3. 配置项目：
-   - 复制 `cfg/configs.json.example` 为 `cfg/configs.json`
-   - 修改配置文件中的关键参数：
-     - `SavePath`：设置视频保存路径
-     - `Proxy`：配置代理服务器地址（如果不需要使用代理，设置成""即可）
-     - `Downloader`：配置下载器及其优先级
-     - `IsNeedVideoProxy`：下载视频是否优先使用代理（最终都会尝试使用代理和不使用代理）
+### 3. 安装 Node 依赖和浏览器
 
-## 使用方法
+根目录需要安装 Playwright：
 
-### 基本使用
+```powershell
+npm install
+npx playwright install chromium
+```
 
-0. 初始化，修改配置文件。主要关注的字段：
-    - SavePath：下载保存的位置
-    - Proxy：http代理服务器url（如果不需要使用代理，设置成""即可）
-    - IsNeedVideoProxy：下载视频是否使用代理
+说明：
+- 这里不是在 `frontend` 目录安装，而是在项目根目录安装。
+- MissAV 被 Cloudflare 拦截时，程序会调用这个 Chromium 做浏览器回退。
+
+### 4. 配置 `cfg/configs.json`
+
+如果还没有配置文件：
+
+```powershell
+Copy-Item cfg\configs.json.example cfg\configs.json
+```
+
+建议重点关注这些字段：
+
 ```json
 {
-    "LogPath": "./logs",
-    "SavePath": "/vol2/1000/MissAV",
-    "DBPath": "./db/downloaded.db",
-    "QueuePath": "./db/download_queue.txt",
-    "Proxy": "http://127.0.0.1:7897",
-    "IsNeedVideoProxy": false,
+  "LogPath": "./logs",
+  "SavePath": "./videos",
+  "DBPath": "./db/downloaded.db",
+  "QueuePath": "./db/download_queue.txt",
+  "Proxy": "http://127.0.0.1:7897",
+  "IsNeedVideoProxy": false,
+  "BrowserFallbackEnabled": true,
+  "BrowserFetchTimeoutSec": 180,
+  "BrowserProfilePath": "./.browser-profile/missav"
 }
 ```
 
-1. 如果本地已有资源，需要先整理目录结构，车牌号大写作为文件夹名字，视频同名放在文件夹里面：
+关键说明：
+- `Proxy`：本地代理地址，当前 Windows 环境下已实际使用 `127.0.0.1:7897`
+- `BrowserFallbackEnabled`：开启 MissAV 浏览器模式回退
+- `BrowserProfilePath`：Playwright 浏览器用户目录，首次运行后会自动生成
+- `SiteCookies`：可给指定站点注入 Cookie，用于提高站点可访问率
+- `SiteHeaders`：可给指定站点附加请求头
 
-```
-...
-├── SVGAL-009
-│   └── SVGAL-009.mp4
-├── STCVS-007
-│   └── STCVS-007.mp4
-...
-```
-然后执行`python3 metadata.py`，爬取元数据。最后生成的目录结构：
-```
-...
-├── SVGAL-009
-│   ├── metadata.json
-│   ├── SVGAL-009-fanart.jpg
-│   ├── SVGAL-009.mp4
-│   ├── SVGAL-009.nfo
-│   └── SVGAL-009-poster.jpg
-├── thumb
-│   ├── JULIA.jpg
-│   ├── ちゃんよた.jpg
-│   ├── 七森莉莉.jpg
-│   ├── 七泽米亚.jpg
-...
+## 单个资源下载
+
+Windows PowerShell：
+
+```powershell
+python main.py VEC-769
+python main.py IPZZ-776
 ```
 
-2. 下载单个资源：
-```bash
-python3 main.py <车牌号>
+强制重新下载：
+
+```powershell
+python main.py IPZZ-776 -f
 ```
 
-3. 强制下载（忽略重复检查——下载过程中ctrl-c就会出现这种情况）：
-```bash
-python3 main.py <车牌号> -f
+下载成功后，输出目录类似：
+
+```text
+videos/
+└── IPZZ-776/
+    ├── IPZZ-776.mp4
+    ├── IPZZ-776.html
+    ├── IPZZ-776.nfo
+    ├── IPZZ-776-poster.jpg
+    ├── IPZZ-776-fanart-1.jpg
+    ├── ...
+    └── metadata.json
 ```
 
-### 使用Docker下載
+## 浏览器回退机制
 
-0. 前置作業如基本使用
+这是当前 Windows 能跑通 MissAV 的关键。
 
-1. Build Docker (初次使用才需要)
-```bash
-(sudo) docker build -t nassav .
+程序流程如下：
+1. 先按普通 HTTP 请求 MissAV 页面。
+2. 如果被 Cloudflare 拦住，自动调用 `tools/missav_browser_fetch.mjs`。
+3. Playwright 打开目标页面或搜索车牌号。
+4. 把真实详情页 HTML 保存到影片目录。
+5. 后续从这个本地 HTML 解析 m3u8、标题、封面和预览图。
+
+因此你看到站内请求可能不是传统页面接口，而是媒体流、推荐接口或 Cloudflare 校验流量，这都是正常的。真正关键的是浏览器最终能否落到影片详情页。
+
+## Windows 一键启动
+
+已经提供 4 个 PowerShell 脚本：
+
+```powershell
+.\start_backend.ps1
+.\start_frontend.ps1
+.\start_all.ps1
+.\run_all.ps1
 ```
 
-2. 下載
-```bash
-(sudo) docker run --rm -v "<本機存片位置>:<cfg/configs.json存片位置>" nassav <車號>
+说明：
+- `start_backend.ps1`：启动 Go 后端
+- `start_frontend.ps1`：启动 Vue 前端开发服务器
+- `start_all.ps1`：分别打开两个 PowerShell 窗口，同时启动前后端
+- `run_all.ps1`：在同一个 PowerShell 窗口内启动整套服务，适合直接盯日志
+
+默认地址：
+- 后端：`http://127.0.0.1:31471`
+- 前端：`http://127.0.0.1:5173`
+
+## 批量队列执行
+
+向 `db/download_queue.txt` 中追加车牌号后执行：
+
+```powershell
+python queue_runner.py
 ```
 
-### 批量下载
+Windows 下建议直接用“任务计划程序”定时运行：
 
-1. 将车牌号添加到 `db/download_queue.txt` 中
-2. 设置定时任务：
-```bash
-20 * * * * cd /path/to/NASSAV && bash cron_task.sh
+```powershell
+python D:\path\to\NASSAV\queue_runner.py
 ```
 
-### HTTP API 服务
+## 补刮削已有资源
 
-1. 编译并启动 HTTP 服务器：
-```bash
+已有视频文件后，可以重新补齐元数据：
+
+```powershell
+python metadata.py
+```
+
+当前逻辑会优先读取本地 `<AVID>.html`，其次再尝试其它来源，因此比旧版更适合 MissAV 当前环境。
+
+## 后端 API
+
+启动 Go 后端：
+
+```powershell
 cd backend
-go build -o main
-./main
+go build -o main.exe
+.\main.exe
 ```
 
-2. 发送下载请求：
-```bash
-curl -X POST http://127.0.0.1:49530/process -d "车牌号"
+默认端口：`31471`
+
+可用环境变量：
+- `NASSAV_PROJECT_ROOT`
+- `NASSAV_MEDIA_PATH`
+- `NASSAV_DB_PATH`
+- `NASSAV_SERVER_PORT`
+- `NASSAV_API_KEY`
+- `NASSAV_PYTHON`
+- `NASSAV_FFMPEG`
+- `NASSAV_M3U8_DOWNLOADER`
+
+示例接口：
+
+```text
+GET /api/videos
+GET /api/videos/{id}
+GET /api/addvideo/{id}
 ```
 
-### 前后端服务
+PowerShell 调用示例：
 
-刮削时下载了大量fanart，故提供一个网页预览。
-
-后端提供了两个API：
-1. 获取车牌号列表：/api/videos
-2. 获取车牌号详细信息：/api/videos/FPRE-017
-
-请求结果如下：
-```
-/api/videos
------------------------------
-[{"id":"ACHJ-057","title":"ACHJ-057 時には勝手に痴女りたい…。Madonna専属 究極美熟女『めぐり』お貸ししますー。","poster":"/file/ACHJ-057/ACHJ-057-poster.jpg"},{"id":"ADN-604","title":"ADN-604 お義父さんは私の事、どう思ってますか？ 七海ティナ","poster":"/file/ADN-604/ADN-604-poster.jpg"},{"id":"AGAV-122","title":"AGAV-122 顔で抜く！！顔面ドアップPOV 関西弁でイチャサド射精管理してくる年上彼女との同棲生活 流川莉央","poster":"/file/AGAV-122/AGAV-122-poster.jpg"},...]
-
-/api/videos/FPRE-017
------------------------------
-{"id":"FPRE-017","title":"FPRE-017 爆乳セレブ痴女に見つめられて犯●れたい 菊乃らん","releaseDate":"2024-02-02","fanarts":["/file/FPRE-017/FPRE-017-fanart-1.jpg","/file/FPRE-017/FPRE-017-fanart-10.jpg","/file/FPRE-017/FPRE-017-fanart-11.jpg","/file/FPRE-017/FPRE-017-fanart-12.jpg","/file/FPRE-017/FPRE-017-fanart-13.jpg","/file/FPRE-017/FPRE-017-fanart-14.jpg","/file/FPRE-017/FPRE-017-fanart-15.jpg","/file/FPRE-017/FPRE-017-fanart-16.jpg","/file/FPRE-017/FPRE-017-fanart-17.jpg","/file/FPRE-017/FPRE-017-fanart-18.jpg","/file/FPRE-017/FPRE-017-fanart-19.jpg","/file/FPRE-017/FPRE-017-fanart-2.jpg","/file/FPRE-017/FPRE-017-fanart-20.jpg","/file/FPRE-017/FPRE-017-fanart-21.jpg","/file/FPRE-017/FPRE-017-fanart-3.jpg","/file/FPRE-017/FPRE-017-fanart-4.jpg","/file/FPRE-017/FPRE-017-fanart-5.jpg","/file/FPRE-017/FPRE-017-fanart-6.jpg","/file/FPRE-017/FPRE-017-fanart-7.jpg","/file/FPRE-017/FPRE-017-fanart-8.jpg","/file/FPRE-017/FPRE-017-fanart-9.jpg","/file/FPRE-017/FPRE-017-fanart.jpg"],"videoFile":"/file/FPRE-017/FPRE-017.mp4"}
+```powershell
+$headers = @{ Authorization = 'Bearer IBHUSDBWQHJEJOBDSW' }
+Invoke-RestMethod -Uri 'http://127.0.0.1:31471/api/addvideo/IPZZ-776' -Headers $headers
 ```
 
-据此使用Vue实现一个前端，预览list和detail。
+## 前端预览
 
-list页：
-![](pic/gallery-list.png)
-detail页：
-![](pic/gallery-detail.png)
+先复制环境文件：
 
-前端部署方式：
-1. 先调整`frontend/src/api/videos.js`中后端的配置：
-```js
-import axios from 'axios'
-const API_BASE = 'http://192.168.31.61:31471' // 改成自己的ip
+```powershell
+Copy-Item frontend\.env.example frontend\.env
 ```
-2. 重新生成静态文件到dist目录下：
-```bash
+
+`frontend/.env` 示例：
+
+```env
+VITE_API_BASE=http://127.0.0.1:31471
+VITE_API_KEY=IBHUSDBWQHJEJOBDSW
+```
+
+启动前端：
+
+```powershell
 cd frontend
+npm install
+npm run dev
+```
+
+打包：
+
+```powershell
 npm run build
 ```
-3. 使用nginx部署静态网页：`127.0.0.1:5177`
 
-## 配置说明
+## 已知事项
 
-### 下载器配置
-
-在 `configs.json` 中可以配置多个下载源及其优先级：
-
-```json
-"Downloader": [
-    {
-        "downloaderName": "MissAV",
-        "domain": "missav.ai",
-        "weight": 300
-    },
-    {
-        "downloaderName": "Jable",
-        "domain": "jable.tv",
-        "weight": 500
-    },
-    {
-        "downloaderName": "HohoJ",
-        "domain": "hohoj.tv",
-        "weight": 0
-    }
-]
-```
-
-### 数据源说明
-
-1. **MissAV**
-   - 优点：资源全面，反爬限制较少
-   - 缺点：清晰度一般（720p-1080p）
-
-2. **Jable**
-   - 优点：中文字幕资源多，清晰度高（1080p）
-   - 缺点：反爬限制较严格
-
-3. **HohoJ**
-   - 优点：清晰度高（1080p），基本无反爬限制
-   - 缺点：中文字幕资源较少
-
-4. **Memo**
-   - 优点：资源较新，更新及时
-   - 缺点：部分资源需要会员
-
-
-## 开发指南
-
-### 添加新的下载器
-
-1. 在 `src/downloader/` 目录下创建新的下载器类
-2. 继承 `Downloader` 基类，实现必要的方法：
-   - `getDownloaderName()`
-   - `getHTML()`
-   - `parseHTML()`
-3. 在 `DownloaderMgr` 中注册新下载器
-4. 在配置文件中添加相应的配置项
-
-示例代码：
-```python
-class NewDownloader(Downloader):
-    def getDownloaderName(self) -> str:
-        return "NewDownloader"
-
-    def getHTML(self, avid: str) -> Optional[str]:
-        # 实现获取HTML的逻辑
-        pass
-
-    def parseHTML(self, html: str) -> Optional[AVDownloadInfo]:
-        # 实现解析HTML的逻辑
-        pass
-```
-### 有需求请自行fork修改，如果想要贡献代码发起PR即可
-
-![](pic/IMG_5150.JPG)
-
-## 注意事项
-
-- 使用本项目需要稳定的代理服务
-- 请遵守相关法律法规，合理使用本工具
-- 建议定期备份数据库文件
-- 下载过程中请确保网络稳定
-- 下载频率不要过高。否则会被cloudflare安排进贤者时间
+- MissAV、Jable 这类站点会频繁换规则，失效时优先检查域名、代理和 Cookie。
+- 光靠 `cf_clearance` 不一定足够，很多情况下还是要靠浏览器模式真正通过 Cloudflare。
+- 下载频率太高容易触发风控。
+- Dockerfile 仍更偏向 Linux 容器，不是当前这套 Windows 原生方案的重点入口。
 
 ## Reference
 
-前人栽树，后人乘凉
-
-1. m3u8-Downloader-Go（m3u8命令行下载器）: https://github.com/Greyh4t/m3u8-Downloader-Go
-2. mrjet（如何获取到missav的m3u8）: https://github.com/cailurus/mrjet
-
+1. [m3u8-Downloader-Go](https://github.com/Greyh4t/m3u8-Downloader-Go)
+2. [mrjet](https://github.com/cailurus/mrjet)
 
 ## 许可证
 
-本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。 
+本项目采用 MIT 许可证，详见 [LICENSE](LICENSE)。
+
+
+

@@ -7,11 +7,11 @@ from .downloader.KanAVDownloader import KanAVDownloader
 from .comm import *
 from typing import Optional
 
+
 class DownloaderMgr:
     downloaders: dict = {}
 
     def __init__(self):
-        # 手动注册handler
         downloader = MissAVDownloader(save_path, myproxy)
         self.downloaders[downloader.getDownloaderName()] = downloader
 
@@ -23,9 +23,9 @@ class DownloaderMgr:
 
         downloader = MemoDownloader(save_path, myproxy)
         self.downloaders[downloader.getDownloaderName()] = downloader
-        
+
         downloader = KanAVDownloader(save_path, myproxy)
         self.downloaders[downloader.getDownloaderName()] = downloader
-    
+
     def GetDownloader(self, downloaderName: str) -> Optional[Downloader]:
-        return self.downloaders[downloaderName]
+        return self.downloaders.get(downloaderName)

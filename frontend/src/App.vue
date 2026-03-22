@@ -3,26 +3,36 @@
     <header class="app-header">
       <div class="header-container">
         <router-link to="/" class="logo">
-          <h1>NASSAV</h1>
+          <div class="logo-mark">N</div>
+          <div class="logo-copy">
+            <h1>NASSAV</h1>
+            <p>Windows 本地片库</p>
+          </div>
         </router-link>
-        
+
         <div class="search-box">
-          <input 
-            v-model="inputContent" 
-            type="text" 
-            placeholder="输入视频内容" 
+          <input
+            v-model="inputContent"
+            type="text"
+            placeholder="输入车牌号，例如 IPZZ-776"
             class="search-input"
-            @keyup.enter="handleAddVideo(inputContent)"
+            @keyup.enter="handleAddVideo"
           >
-          <button 
+          <button
             class="search-button"
-            @click="handleAddVideo(inputContent)"
+            @click="handleAddVideo"
             :disabled="isAdding"
           >
-            {{ isAdding ? '添加中...' : '添加' }}
+            {{ isAdding ? '提交中...' : '添加下载' }}
           </button>
         </div>
       </div>
+
+      <transition name="fade">
+        <div v-if="notice.message" class="notice" :class="`notice-${notice.type}`">
+          {{ notice.message }}
+        </div>
+      </transition>
     </header>
 
     <main class="app-main">
@@ -34,7 +44,7 @@
     </main>
 
     <footer class="app-footer">
-      <p>© 2025 NASSAV，你的NAS小姐姐助手</p>
+      <p>© 2026 NASSAV，本机可用的 Windows 片库面板</p>
     </footer>
   </div>
 </template>
@@ -47,31 +57,83 @@ export default {
   data() {
     return {
       inputContent: '',
-      isAdding: false
+      isAdding: false,
+      notice: {
+        type: 'info',
+        message: ''
+      },
+      noticeTimer: null
+    }
+  },
+  beforeUnmount() {
+    if (this.noticeTimer) {
+      clearTimeout(this.noticeTimer)
     }
   },
   methods: {
+    showNotice(message, type = 'info') {
+      this.notice = { message, type }
+
+      if (this.noticeTimer) {
+        clearTimeout(this.noticeTimer)
+      }
+
+      this.noticeTimer = setTimeout(() => {
+        this.notice = { message: '', type: 'info' }
+      }, 3500)
+    },
     async handleAddVideo() {
-      videosApi.addVideo(this.inputContent.trim())
+      if (this.isAdding) {
+        return
+      }
+
+      this.isAdding = true
+      try {
+        const result = await videosApi.addVideo(this.inputContent)
+        this.inputContent = ''
+        this.showNotice(result.message, 'success')
+        window.dispatchEvent(new CustomEvent('videos:refresh'))
+        if (this.$route.name !== 'home') {
+          this.$router.push({ name: 'home' })
+        }
+      } catch (error) {
+        this.showNotice(error.message || '添加视频失败', 'error')
+      } finally {
+        this.isAdding = false
+      }
     }
   }
 }
 </script>
 
 <style>
-/* 全局基础样式 */
 :root {
-  --primary-color: #ff9bb3;
-  --secondary-color: #ff6b8b;
-  --accent-color: #ffcdd8;
-  --text-color: #5a3a4a;
+  --rose-100: #fff1f1;
+  --rose-200: #ffd8dd;
+  --rose-300: #ffb1bd;
+  --rose-500: #d64b67;
+  --rose-700: #8a2037;
+  --ink-900: #2a1720;
+  --sand-50: #fffaf5;
+  --gold-400: #f4b860;
+  --success-bg: #edf9f0;
+  --success-text: #1f7a38;
+  --error-bg: #fff0f0;
+  --error-text: #b42318;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
   padding: 0;
-  font-family: Arial, sans-serif;
-  background-color: #fff5f7;
+  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  color: var(--ink-900);
+  background:
+    radial-gradient(circle at top left, rgba(255, 177, 189, 0.4), transparent 24%),
+    linear-gradient(180deg, #fff8f4 0%, #fffdf9 100%);
 }
 
 #app {
@@ -80,157 +142,174 @@ body {
   min-height: 100vh;
 }
 
-/* 导航栏样式 */
 .app-header {
-  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
   color: white;
-  padding: 0;
-  box-shadow: 0 4px 15px rgba(255, 107, 139, 0.2);
-  position: relative;
+  background:
+    linear-gradient(120deg, rgba(138, 32, 55, 0.96), rgba(214, 75, 103, 0.92)),
+    linear-gradient(45deg, rgba(244, 184, 96, 0.18), transparent);
+  box-shadow: 0 10px 28px rgba(138, 32, 55, 0.14);
 }
 
 .header-container {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  max-width: 1200px;
+  gap: 1rem;
+  max-width: 1360px;
   margin: 0 auto;
-  padding: 1.2rem 2rem;
-  width: 100%;
+  padding: 0.9rem 1.5rem;
 }
 
 .logo {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
   color: white;
   text-decoration: none;
-  flex-shrink: 0;
+  min-width: 0;
 }
 
-.logo h1 {
-  font-size: 1.5rem;
-  font-weight: 500;
+.logo-mark {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--rose-700);
+  background: linear-gradient(145deg, #fff7e6, #ffd9de);
+}
+
+.logo-copy h1 {
   margin: 0;
-  white-space: nowrap;
+  font-size: 1.35rem;
+  line-height: 1.1;
 }
 
-/* 搜索框样式 - 根据图片调整 */
+.logo-copy p {
+  margin: 0.1rem 0 0;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.78);
+}
+
 .search-box {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
+  gap: 0.65rem;
+  width: min(100%, 460px);
 }
 
 .search-input {
-  padding: 8px 12px;
-  border: none;
-  border-radius: 20px;
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0 0.95rem;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 12px;
   outline: none;
-  font-size: 14px;
-  width: 180px;
-  height: 36px;
-  transition: all 0.3s ease;
-  background-color: white;
-  color: var(--secondary-color);
+  font-size: 0.92rem;
+  color: var(--ink-900);
+  background: rgba(255, 250, 245, 0.96);
 }
 
 .search-input::placeholder {
-  color: var(--accent-color);
+  color: #b77a86;
+}
+
+.search-input:focus {
+  border-color: rgba(244, 184, 96, 0.7);
+  box-shadow: 0 0 0 4px rgba(244, 184, 96, 0.14);
 }
 
 .search-button {
-  background-color: white;
-  color: var(--secondary-color);
+  flex-shrink: 0;
+  height: 40px;
+  padding: 0 1rem;
   border: none;
-  padding: 8px 16px;
-  border-radius: 20px;
-  height: 36px;
+  border-radius: 12px;
   cursor: pointer;
-  font-weight: 500;
-  transition: all 0.3s ease;
-  white-space: nowrap;
+  font-weight: 700;
+  color: var(--rose-700);
+  background: linear-gradient(135deg, #ffe7ac, #ffc97d);
+  transition: transform 0.2s ease, opacity 0.2s ease;
 }
 
-.search-button:hover {
-  background-color: var(--accent-color);
-  color: white;
+.search-button:hover:not(:disabled) {
+  transform: translateY(-1px);
 }
 
-/* 主内容区 */
+.search-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.notice {
+  max-width: 1360px;
+  margin: 0 auto 0.85rem;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  font-size: 0.92rem;
+}
+
+.notice-success {
+  color: var(--success-text);
+  background: var(--success-bg);
+}
+
+.notice-error {
+  color: var(--error-text);
+  background: var(--error-bg);
+}
+
+.notice-info {
+  color: var(--rose-700);
+  background: rgba(255, 255, 255, 0.88);
+}
+
 .app-main {
   flex: 1;
-  padding: 2rem;
-  max-width: 1200px;
   width: 100%;
+  max-width: 1360px;
   margin: 0 auto;
+  padding: 1.4rem 1.5rem 3rem;
 }
 
-/* 底部样式 */
 .app-footer {
   text-align: center;
-  padding: 1.2rem;
-  background: linear-gradient(135deg, var(--secondary-color), #ff4777);
+  padding: 0.9rem;
   color: white;
-  font-size: 0.9rem;
+  background: linear-gradient(135deg, #65192a, #9f2944);
 }
 
-/* 响应式调整 - 重点修复小屏幕错位问题 */
-@media (max-width: 768px) {
-  .header-container {
-    padding: 1rem;
-    flex-wrap: nowrap; /* 防止换行 */
-  }
-  
-  .logo h1 {
-    font-size: 1.2rem;
-  }
-  
-  .search-box {
-    gap: 8px;
-  }
-  
-  .search-input {
-    width: 120px;
-    font-size: 13px;
-  }
-  
-  .search-button {
-    padding: 8px 12px;
-    font-size: 13px;
-  }
-  
-  .app-main {
-    padding: 1rem;
-  }
-}
-
-/* 超小屏幕调整 */
-@media (max-width: 480px) {
-  .header-container {
-    padding: 0.8rem;
-  }
-  
-  .search-input {
-    width: 100px;
-  }
-  
-  .search-button {
-    padding: 6px 10px;
-  }
-}
-
-/* 其他全局样式 */
-* {
-  box-sizing: border-box;
-}
-
-/* 路由过渡动画 */
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.3s ease;
+  transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+  transform: translateY(-6px);
+}
+
+@media (max-width: 768px) {
+  .header-container {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0.9rem 1rem;
+  }
+
+  .search-box {
+    width: 100%;
+  }
+
+  .app-main {
+    padding: 1rem 1rem 2rem;
+  }
+
+  .notice {
+    margin: 0 1rem 0.9rem;
+  }
 }
 </style>
