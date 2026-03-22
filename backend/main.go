@@ -6,13 +6,12 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,28 +21,32 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// 服务器配置
-const (
-	basePath   = "/vol2/1000/MissAV"
-	serverPort = ":31471"
-	apiKey     = "IBHUSDBWQHJEJOBDSW"
-)
+type AppConfig struct {
+	SavePath  string `json:"SavePath"`
+	DBPath    string `json:"DBPath"`
+	QueuePath string `json:"QueuePath"`
+}
 
-// 全局缓存
 var (
 	videoListCache []VideoItem
 	cacheMutex     sync.RWMutex
-	logger         = log.New(os.Stdout, "[MissAV] ", log.LstdFlags|log.Lshortfile)
+	logger         = log.New(os.Stdout, "[NASSAV] ", log.LstdFlags|log.Lshortfile)
+	projectRoot    string
+	mediaPath      string
+	databasePath   string
+	queueFilePath  string
+	workFilePath   string
+	serverPort     string
+	apiKey         string
+	pythonCmd      string
 )
 
-// VideoItem 表示视频列表项
 type VideoItem struct {
 	ID     string `json:"id"`
 	Title  string `json:"title"`
 	Poster string `json:"poster"`
 }
 
-// VideoDetail 视频详细信息
 type VideoDetail struct {
 	ID          string   `json:"id"`
 	Title       string   `json:"title"`
@@ -52,7 +55,13 @@ type VideoDetail struct {
 	VideoFile   string   `json:"videoFile,omitempty"`
 }
 
-// NfoFile NFO文件结构
+type DownloadStatus struct {
+	Active     bool     `json:"active"`
+	Current    string   `json:"current"`
+	Queue      []string `json:"queue"`
+	QueueCount int      `json:"queueCount"`
+}
+
 type NfoFile struct {
 	XMLName     xml.Name `xml:"movie"`
 	Title       string   `xml:"title"`
@@ -62,20 +71,12 @@ type NfoFile struct {
 
 func enableCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 允许的域名（生产环境应替换为实际前端域名）
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-
-		// 允许的HTTP方法
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
-
-		// 允许的请求头
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-
-		// 允许携带Cookie（如果需要）
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 
-		// 预检请求直接返回200
-		if r.Method == "OPTIONS" {
+		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -85,39 +86,164 @@ func enableCORS(next http.Handler) http.Handler {
 }
 
 func main() {
-	logger.Println("Starting MissAV server...")
+	projectRoot = findProjectRoot()
+	config, err := loadAppConfig(projectRoot)
+	if err != nil {
+		logger.Fatalf("Failed to load config: %v", err)
+	}
 
-	// 初始化缓存
+	mediaPath = resolvePath(projectRoot, firstNonEmpty(os.Getenv("NASSAV_MEDIA_PATH"), config.SavePath, "./videos"))
+	databasePath = resolvePath(projectRoot, firstNonEmpty(os.Getenv("NASSAV_DB_PATH"), config.DBPath, "./db/downloaded.db"))
+	queueFilePath = resolvePath(projectRoot, firstNonEmpty(os.Getenv("NASSAV_QUEUE_PATH"), config.QueuePath, "./db/download_queue.txt"))
+	workFilePath = resolvePath(projectRoot, firstNonEmpty(os.Getenv("NASSAV_WORK_PATH"), "./work"))
+	serverPort = normalizePort(firstNonEmpty(os.Getenv("NASSAV_SERVER_PORT"), "31471"))
+	apiKey = firstNonEmpty(os.Getenv("NASSAV_API_KEY"), "IBHUSDBWQHJEJOBDSW")
+	pythonCmd = defaultPythonCommand()
+	if override := os.Getenv("NASSAV_PYTHON"); override != "" {
+		pythonCmd = override
+	}
+
+	if err := os.MkdirAll(mediaPath, 0o755); err != nil {
+		logger.Fatalf("Failed to create media path %s: %v", mediaPath, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(databasePath), 0o755); err != nil {
+		logger.Fatalf("Failed to create db directory %s: %v", filepath.Dir(databasePath), err)
+	}
+	if err := os.MkdirAll(filepath.Dir(queueFilePath), 0o755); err != nil {
+		logger.Fatalf("Failed to create queue directory %s: %v", filepath.Dir(queueFilePath), err)
+	}
+	if err := ensureFile(queueFilePath); err != nil {
+		logger.Fatalf("Failed to ensure queue file: %v", err)
+	}
+	if err := ensureFile(workFilePath); err != nil {
+		logger.Fatalf("Failed to ensure work file: %v", err)
+	}
+	if err := ensureDownloadTable(databasePath); err != nil {
+		logger.Printf("Ensure download table failed: %v", err)
+	}
+
+	logger.Printf("Starting server on port %s", serverPort)
+	logger.Printf("Project root: %s", projectRoot)
+	logger.Printf("Media path: %s", mediaPath)
+	logger.Printf("Database path: %s", databasePath)
+
 	if err := buildVideoListCache(); err != nil {
 		logger.Fatalf("Failed to build initial cache: %v", err)
 	}
 
-	// 启动定时缓存更新
 	go startCacheUpdater(30 * time.Minute)
 
-	// 设置路由
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/videos", listVideosHandler)
 	mux.HandleFunc("/api/videos/", videoDetailHandler)
 	mux.HandleFunc("/api/addvideo/", addVideoHandler)
+	mux.HandleFunc("/api/status", downloadStatusHandler)
 	mux.HandleFunc("/file/", imageHandler)
 
-	// 包装CORS中间件
 	handler := enableCORS(mux)
-
-	// 确保端口号是干净的（如 "8080" 而不是 ":8080"）
-	port := strings.TrimPrefix(serverPort, ":")
-
-	// 方案1：显式创建IPv6监听器（兼容IPv4）
-	listener4, _ := net.Listen("tcp4", "0.0.0.0:"+port)
-	listener6, _ := net.Listen("tcp6", "[::]:"+port)
-	go http.Serve(listener4, handler)
-	log.Fatal(http.Serve(listener6, handler))
-
-	logger.Printf("Server started on port %s (IPv6, with IPv4 compatibility)", port)
+	logger.Fatal(http.ListenAndServe(":"+serverPort, handler))
 }
 
-// startCacheUpdater 定时更新缓存
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func normalizePort(port string) string {
+	return strings.TrimPrefix(strings.TrimSpace(port), ":")
+}
+
+func defaultPythonCommand() string {
+	candidates := []string{"python3", "python"}
+	if runtime.GOOS == "windows" {
+		candidates = []string{"python", "py"}
+	}
+
+	for _, candidate := range candidates {
+		if _, err := exec.LookPath(candidate); err == nil {
+			return candidate
+		}
+	}
+	return candidates[0]
+}
+
+func findProjectRoot() string {
+	if override := os.Getenv("NASSAV_PROJECT_ROOT"); override != "" {
+		return override
+	}
+
+	candidates := []string{}
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, cwd)
+	}
+	if exePath, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Dir(exePath))
+	}
+
+	for _, candidate := range candidates {
+		if root, ok := locateProjectRoot(candidate); ok {
+			return root
+		}
+	}
+
+	if len(candidates) > 0 {
+		return candidates[0]
+	}
+	return "."
+}
+
+func locateProjectRoot(start string) (string, bool) {
+	current := start
+	for i := 0; i < 8; i++ {
+		configPath := filepath.Join(current, "cfg", "configs.json")
+		if _, err := os.Stat(configPath); err == nil {
+			return current, true
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
+	return "", false
+}
+
+func loadAppConfig(root string) (AppConfig, error) {
+	configPath := filepath.Join(root, "cfg", "configs.json")
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		return AppConfig{}, err
+	}
+
+	var config AppConfig
+	if err := json.Unmarshal(content, &config); err != nil {
+		return AppConfig{}, err
+	}
+	return config, nil
+}
+
+func resolvePath(root, raw string) string {
+	if raw == "" {
+		return root
+	}
+	if filepath.IsAbs(raw) {
+		return filepath.Clean(raw)
+	}
+	return filepath.Clean(filepath.Join(root, raw))
+}
+
+func ensureFile(path string) error {
+	file, err := os.OpenFile(path, os.O_CREATE, 0o644)
+	if err != nil {
+		return err
+	}
+	return file.Close()
+}
+
 func startCacheUpdater(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -132,7 +258,6 @@ func startCacheUpdater(interval time.Duration) {
 	}
 }
 
-// buildVideoListCache 构建视频列表缓存
 func buildVideoListCache() error {
 	cacheMutex.Lock()
 	defer cacheMutex.Unlock()
@@ -140,10 +265,9 @@ func buildVideoListCache() error {
 	startTime := time.Now()
 	logger.Println("Building video list cache...")
 
-	// 读取目录
-	files, err := os.ReadDir(basePath)
+	files, err := os.ReadDir(mediaPath)
 	if err != nil {
-		logger.Printf("Error reading directory %s: %v", basePath, err)
+		logger.Printf("Error reading directory %s: %v", mediaPath, err)
 		return fmt.Errorf("read directory failed: %w", err)
 	}
 
@@ -152,7 +276,6 @@ func buildVideoListCache() error {
 		info  os.FileInfo
 	}
 
-	// 获取文件夹的修改时间信息
 	var dirs []dirEntryWithInfo
 	for _, file := range files {
 		if !file.IsDir() {
@@ -166,15 +289,13 @@ func buildVideoListCache() error {
 		dirs = append(dirs, dirEntryWithInfo{entry: file, info: info})
 	}
 
-	// 按修改时间倒序排序（最新的在前面）
 	sort.Slice(dirs, func(i, j int) bool {
 		return dirs[i].info.ModTime().After(dirs[j].info.ModTime())
 	})
 
-	// 如果文件夹数量一致（且都是有效文件夹），则跳过重建
 	validCount := 0
 	for _, dir := range dirs {
-		posterPath := filepath.Join(basePath, dir.entry.Name(), dir.entry.Name()+"-poster.jpg")
+		posterPath := filepath.Join(mediaPath, dir.entry.Name(), dir.entry.Name()+"-poster.jpg")
 		if _, err := os.Stat(posterPath); err == nil {
 			validCount++
 		}
@@ -185,13 +306,12 @@ func buildVideoListCache() error {
 		return nil
 	}
 
-	// 清空现有缓存
 	videoListCache = nil
 
 	var count int
 	for _, dir := range dirs {
 		videoID := dir.entry.Name()
-		posterPath := filepath.Join(basePath, videoID, videoID+"-poster.jpg")
+		posterPath := filepath.Join(mediaPath, videoID, videoID+"-poster.jpg")
 
 		if _, err := os.Stat(posterPath); err != nil {
 			logger.Printf("Poster not found for %s: %v", videoID, err)
@@ -212,26 +332,21 @@ func buildVideoListCache() error {
 		count++
 	}
 
-	logger.Printf("Cache built successfully. Items: %d, Duration: %v",
-		count, time.Since(startTime))
+	logger.Printf("Cache built successfully. Items: %d, Duration: %v", count, time.Since(startTime))
 	return nil
 }
 
-// parseTitleAndDate 解析NFO文件获取标题和日期
 func parseTitleAndDate(videoID string) (title, releaseDate string, err error) {
-	nfoPath := filepath.Join(basePath, videoID, videoID+".nfo")
+	nfoPath := filepath.Join(mediaPath, videoID, videoID+".nfo")
 
-	// 使用os.Open确保能处理BOM头
 	file, err := os.Open(nfoPath)
 	if err != nil {
 		return "", "", fmt.Errorf("open file failed: %w", err)
 	}
 	defer file.Close()
 
-	// 创建UTF-8解码器（自动处理BOM头）
 	decoder := xml.NewDecoder(file)
 	decoder.CharsetReader = func(charset string, input io.Reader) (io.Reader, error) {
-		// 强制使用UTF-8，忽略文件声明的编码
 		return input, nil
 	}
 
@@ -240,13 +355,10 @@ func parseTitleAndDate(videoID string) (title, releaseDate string, err error) {
 		return "", "", fmt.Errorf("xml decode failed: %w", err)
 	}
 
-	// 确定发布日期
 	date := nfo.ReleaseDate
 	if date == "" {
 		date = nfo.Premiered
 	}
-
-	// 确保标题不为空
 	if nfo.Title == "" {
 		nfo.Title = videoID
 	}
@@ -254,11 +366,14 @@ func parseTitleAndDate(videoID string) (title, releaseDate string, err error) {
 	return nfo.Title, date, nil
 }
 
-// listVideosHandler 获取视频列表
 func listVideosHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httpError(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
+	}
+
+	if err := buildVideoListCache(); err != nil {
+		logger.Printf("List request cache refresh failed: %v", err)
 	}
 
 	cacheMutex.RLock()
@@ -271,7 +386,6 @@ func listVideosHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// videoDetailHandler 获取视频详情
 func videoDetailHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httpError(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -287,7 +401,6 @@ func videoDetailHandler(w http.ResponseWriter, r *http.Request) {
 	detail := VideoDetail{ID: videoID}
 	startTime := time.Now()
 
-	// 解析NFO文件
 	title, date, err := parseTitleAndDate(videoID)
 	if err != nil {
 		logger.Printf("NFO parse for %s failed: %v", videoID, err)
@@ -298,10 +411,8 @@ func videoDetailHandler(w http.ResponseWriter, r *http.Request) {
 		detail.ReleaseDate = date
 	}
 
-	// 查找fanart图片
-	fanartDir := filepath.Join(basePath, videoID)
-	if files, err := ioutil.ReadDir(fanartDir); err == nil {
-		// 创建临时存储结构
+	fanartDir := filepath.Join(mediaPath, videoID)
+	if files, err := os.ReadDir(fanartDir); err == nil {
 		type fanartFile struct {
 			path   string
 			num    int
@@ -309,13 +420,9 @@ func videoDetailHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var fanarts []fanartFile
-
 		for _, file := range files {
 			name := file.Name()
-			if !file.IsDir() && strings.HasPrefix(name, videoID+"-fanart") &&
-				strings.HasSuffix(name, ".jpg") {
-
-				// 提取文件名中的数字部分
+			if !file.IsDir() && strings.HasPrefix(name, videoID+"-fanart") && strings.HasSuffix(name, ".jpg") {
 				parts := strings.Split(name, "-fanart")
 				if len(parts) < 2 {
 					continue
@@ -326,15 +433,9 @@ func videoDetailHandler(w http.ResponseWriter, r *http.Request) {
 
 				var num int
 				var hasNum bool
-
-				// 尝试解析数字
 				if n, err := strconv.Atoi(numPart); err == nil {
 					num = n
 					hasNum = true
-				} else {
-					// 没有数字的情况
-					num = 0
-					hasNum = false
 				}
 
 				fanarts = append(fanarts, fanartFile{
@@ -345,24 +446,19 @@ func videoDetailHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// 排序
 		sort.Slice(fanarts, func(i, j int) bool {
-			// 都有数字的情况，按数字排序
 			if fanarts[i].hasNum && fanarts[j].hasNum {
 				return fanarts[i].num < fanarts[j].num
 			}
-			// 只有一个有数字的情况，有数字的排在前面
 			if fanarts[i].hasNum && !fanarts[j].hasNum {
 				return true
 			}
 			if !fanarts[i].hasNum && fanarts[j].hasNum {
 				return false
 			}
-			// 都没有数字的情况，按原始文件名排序
 			return fanarts[i].path < fanarts[j].path
 		})
 
-		// 将排序后的结果存入detail.Fanarts
 		for _, f := range fanarts {
 			detail.Fanarts = append(detail.Fanarts, f.path)
 		}
@@ -370,8 +466,7 @@ func videoDetailHandler(w http.ResponseWriter, r *http.Request) {
 		logger.Printf("Error reading fanart dir for %s: %v", videoID, err)
 	}
 
-	// 检查视频文件
-	videoFile := filepath.Join(basePath, videoID, videoID+".mp4")
+	videoFile := filepath.Join(mediaPath, videoID, videoID+".mp4")
 	if _, err := os.Stat(videoFile); err == nil {
 		detail.VideoFile = fmt.Sprintf("/file/%s/%s.mp4", videoID, videoID)
 	}
@@ -385,7 +480,28 @@ func videoDetailHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// imageHandler 处理图片请求
+func downloadStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httpError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	current := readCurrentWork(workFilePath)
+	queue := sanitizeQueueItems(queueFilePath, current)
+	status := DownloadStatus{
+		Active:     current != "",
+		Current:    current,
+		Queue:      queue,
+		QueueCount: len(queue),
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		logger.Printf("Error encoding status: %v", err)
+		httpError(w, "Internal server error", http.StatusInternalServerError)
+	}
+}
+
 func imageHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httpError(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -400,10 +516,9 @@ func imageHandler(w http.ResponseWriter, r *http.Request) {
 
 	videoID := pathParts[0]
 	filename := strings.Join(pathParts[1:], "/")
-	imagePath := filepath.Join(basePath, videoID, filename)
+	imagePath := filepath.Join(mediaPath, videoID, filename)
 
-	// 安全检查
-	if !strings.HasPrefix(filepath.Clean(imagePath), filepath.Clean(basePath)) {
+	if !strings.HasPrefix(filepath.Clean(imagePath), filepath.Clean(mediaPath)) {
 		httpError(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
@@ -418,7 +533,6 @@ func imageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 设置Content-Type
 	switch filepath.Ext(filename) {
 	case ".jpg", ".jpeg":
 		w.Header().Set("Content-Type", "image/jpeg")
@@ -432,21 +546,17 @@ func imageHandler(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, imagePath)
 }
 
-// downloadQueueHandler 新增下载队列
 func addVideoHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httpError(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// 从请求头获取API密钥
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
 		http.Error(w, "Authorization header missing", http.StatusUnauthorized)
 		return
 	}
-
-	// 验证API密钥
 	if !strings.HasPrefix(authHeader, "Bearer ") {
 		http.Error(w, "Invalid authorization format", http.StatusUnauthorized)
 		return
@@ -458,65 +568,158 @@ func addVideoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 读取请求体
 	videoID := strings.TrimPrefix(r.URL.Path, "/api/addvideo/")
 	if videoID == "" {
 		httpError(w, "Invalid video ID", http.StatusBadRequest)
 		return
 	}
 
-	// 将请求体转换为字符串，强制大写
-	id := strings.ToUpper(string(videoID))
-	if id == "" {
-		http.Error(w, "ID is required", http.StatusBadRequest)
-		return
-	}
-	logger.Printf("Received ID: %s\n", id)
+	id := strings.ToUpper(videoID)
+	logger.Printf("Received ID: %s", id)
 
-	// 检查sqlite里面是否有这个车牌号
-	db, err := sql.Open("sqlite3", "../db/downloaded.db")
+	db, err := sql.Open("sqlite3", databasePath)
 	if err != nil {
-		log.Fatal(err)
+		httpError(w, "Database open failed", http.StatusInternalServerError)
+		logger.Printf("Open DB failed: %v", err)
+		return
 	}
 	defer db.Close()
 
 	exists, err := checkStringExists(db, id)
 	if err != nil {
-		log.Fatal(err)
+		logger.Printf("Query DB failed: %v", err)
+		exists = checkVideoArtifacts(id)
+		logger.Printf("Fallback artifact check for %s: %v", id, exists)
 	}
 
 	response := fmt.Sprintf("%s already downloaded", id)
-	// 执行Python脚本
 	if !exists {
 		response = fmt.Sprintf("Add %s to download queue", id)
 		go func() {
-			cmd := exec.Command("sh", "-c", fmt.Sprintf("cd .. && python3 main.py %s", id))
-			err := cmd.Run()
-			if err != nil {
+			cmd := exec.Command(pythonCmd, "main.py", id)
+			cmd.Dir = projectRoot
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
 				logger.Printf("command exec failed: %v", err)
 			} else {
-				logger.Printf("command exec succ!")
+				logger.Printf("command exec succ")
 			}
 		}()
 	}
 	logger.Println(response)
 
-	// 设置响应内容类型
 	w.Header().Set("Content-Type", "text/plain")
-	w.Write([]byte(response))
+	_, _ = w.Write([]byte(response))
 }
 
 func checkStringExists(db *sql.DB, target string) (bool, error) {
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS MissAV (bvid TEXT PRIMARY KEY)"); err != nil {
+		return false, err
+	}
+
 	var exists bool
 	query := "SELECT EXISTS(SELECT 1 FROM MissAV WHERE bvid = ? LIMIT 1)"
 	err := db.QueryRow(query, target).Scan(&exists)
 	return exists, err
 }
 
-// httpError 统一的HTTP错误响应
+func ensureDownloadTable(dbPath string) error {
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	_, err = db.Exec("CREATE TABLE IF NOT EXISTS MissAV (bvid TEXT PRIMARY KEY)")
+	return err
+}
+
+func checkVideoArtifacts(videoID string) bool {
+	videoDir := filepath.Join(mediaPath, videoID)
+	mp4Path := filepath.Join(videoDir, videoID+".mp4")
+	nfoPath := filepath.Join(videoDir, videoID+".nfo")
+
+	if _, err := os.Stat(mp4Path); err == nil {
+		return true
+	}
+	if _, err := os.Stat(nfoPath); err == nil {
+		return true
+	}
+	return false
+}
+
+func readCurrentWork(path string) string {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	value := strings.TrimSpace(string(content))
+	if value == "" || value == "0" || value == "1" {
+		return ""
+	}
+	return strings.ToUpper(value)
+}
+
+func readQueueItems(path string) []string {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return []string{}
+	}
+	lines := strings.Split(string(content), "\n")
+	items := make([]string, 0, len(lines))
+	for _, line := range lines {
+		value := strings.TrimSpace(line)
+		if value == "" {
+			continue
+		}
+		items = append(items, strings.ToUpper(value))
+	}
+	return items
+}
+
+func sanitizeQueueItems(path string, current string) []string {
+	items := readQueueItems(path)
+	if len(items) == 0 {
+		return []string{}
+	}
+
+	seen := make(map[string]bool)
+	cleaned := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == "" {
+			continue
+		}
+		if current != "" && item == current {
+			continue
+		}
+		if seen[item] {
+			continue
+		}
+		if checkVideoArtifacts(item) {
+			continue
+		}
+		seen[item] = true
+		cleaned = append(cleaned, item)
+	}
+
+	if len(cleaned) != len(items) {
+		content := strings.Join(cleaned, "\n")
+		if content != "" {
+			content += "\n"
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			logger.Printf("Failed to rewrite queue file: %v", err)
+		}
+	}
+
+	return cleaned
+}
+
 func httpError(w http.ResponseWriter, message string, code int) {
 	logger.Printf("HTTP Error %d: %s", code, message)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
+

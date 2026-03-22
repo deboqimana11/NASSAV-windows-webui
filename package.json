@@ -1,0 +1,23 @@
+{
+  "name": "nassav",
+  "version": "1.0.0",
+  "description": "<div align=\"center\"> <img style=\"max-width:50%;\" src=\"pic/logo.png\" alt=\"NASSAV\" /> <br> </div>",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Satoing/NASSAV.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Satoing/NASSAV/issues"
+  },
+  "homepage": "https://github.com/Satoing/NASSAV#readme",
+  "dependencies": {
+    "playwright": "^1.58.2"
+  }
+}

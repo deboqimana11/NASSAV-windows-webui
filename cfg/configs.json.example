@@ -1,45 +1,64 @@
 {
-    "LogPath": "./logs",
-    "SavePath": "/vol2/1000/MissAV",
-    "DBPath": "./db/downloaded.db",
-    "QueuePath": "./db/download_queue.txt",
-    "Proxy": "http://127.0.0.1:7897",
-    "IsNeedVideoProxy": false,
-    "Downloader": [
-        {
-            "downloaderName": "MissAV",
-            "domain": "missav.ai",
-            "weight": 300
-        },
-        {
-            "downloaderName": "Jable",
-            "domain": "jable.tv",
-            "weight": 500
-        },
-        {
-            "downloaderName": "HohoJ",
-            "domain": "hohoj.tv",
-            "weight": 400
-        },
-        {
-            "downloaderName": "Memo",
-            "domain": "memojav.com",
-            "weight": 600
-        },
-        {
-            "downloaderName": "AvToday",
-            "domain": "avtoday.io",
-            "weight": 0
-        },
-        {
-            "downloaderName": "NetFlav",
-            "domain": "netflav.com",
-            "weight": 0
-        },
-        {
-            "downloaderName": "KissAv",
-            "domain": "f15.bzraizy.cc",
-            "weight": 0
-        }
-    ]
+  "LogPath": "./logs",
+  "SavePath": "./videos",
+  "DBPath": "./db/downloaded.db",
+  "QueuePath": "./db/download_queue.txt",
+  "Proxy": "",
+  "IsNeedVideoProxy": false,
+  "SiteCookies": {
+    "missav.ai": "cf_clearance=YOUR_COOKIE_HERE"
+  },
+  "SiteHeaders": {
+    "missav.ai": {
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+      "Cache-Control": "no-cache"
+    }
+  },
+  "ScraperDomain": [
+    "www.javbus.com",
+    "www.busdmm.ink",
+    "www.dmmsee.bond"
+  ],
+  "Downloader": [
+    {
+      "downloaderName": "MissAV",
+      "domain": "missav.ai",
+      "weight": 300
+    },
+    {
+      "downloaderName": "Jable",
+      "domain": "jable.tv",
+      "weight": 500
+    },
+    {
+      "downloaderName": "HohoJ",
+      "domain": "hohoj.tv",
+      "weight": 400
+    },
+    {
+      "downloaderName": "Memo",
+      "domain": "memojav.com",
+      "weight": 600
+    },
+    {
+      "downloaderName": "KanAV",
+      "domain": "kanav.info",
+      "weight": 490
+    },
+    {
+      "downloaderName": "AvToday",
+      "domain": "avtoday.io",
+      "weight": 0
+    },
+    {
+      "downloaderName": "NetFlav",
+      "domain": "netflav.com",
+      "weight": 0
+    },
+    {
+      "downloaderName": "KissAv",
+      "domain": "f15.bzraizy.cc",
+      "weight": 0
+    }
+  ]
 }
