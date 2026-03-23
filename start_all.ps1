@@ -13,5 +13,5 @@ Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoExit','-ExecutionPo
 Start-Sleep -Seconds 2
 Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoExit','-ExecutionPolicy','Bypass','-File', $frontendScript, '-Port', $WebPort) -WorkingDirectory $PSScriptRoot | Out-Null
 
-Write-Host "已启动后端 http://127.0.0.1:$ApiPort 和前端 http://127.0.0.1:$WebPort"
-Write-Host '如果 cfg\configs.json 不存在，后端窗口会自动从示例文件生成。'
+Write-Host "Started backend http://127.0.0.1:$ApiPort and frontend http://127.0.0.1:$WebPort"
+Write-Host 'If cfg\configs.json does not exist, the backend window will create it from the example file automatically.'

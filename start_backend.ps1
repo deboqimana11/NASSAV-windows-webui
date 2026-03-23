@@ -11,11 +11,11 @@ function Ensure-Config {
 
   if (-not (Test-Path $configPath)) {
     if (-not (Test-Path $examplePath)) {
-      throw '缺少 cfg\configs.json.example，无法自动生成配置文件。'
+      throw 'Missing cfg\configs.json.example. Cannot create cfg\configs.json automatically.'
     }
 
     Copy-Item $examplePath $configPath
-    Write-Host '已自动创建 cfg\configs.json，请按需检查代理等配置。'
+    Write-Host 'Created cfg\configs.json automatically. Please review proxy and related settings if needed.'
   }
 }
 
@@ -29,13 +29,13 @@ function Resolve-BackendExe {
 
   if (Test-Path $legacyPath) {
     Copy-Item $legacyPath $exePath -Force
-    Write-Host '检测到 backend\main，已自动复制为 backend\main.exe。'
+    Write-Host 'Found backend\main and copied it to backend\main.exe.'
     return $exePath
   }
 
   $goCmd = Get-Command go -ErrorAction SilentlyContinue
   if ($goCmd) {
-    Write-Host '未找到 backend\main.exe，正在自动编译 Go 后端...'
+    Write-Host 'backend\main.exe not found. Building Go backend automatically...'
     Push-Location (Join-Path $PSScriptRoot 'backend')
     try {
       & $goCmd.Source build -o main.exe
@@ -45,17 +45,17 @@ function Resolve-BackendExe {
     }
 
     if (Test-Path $exePath) {
-      Write-Host 'Go 后端编译完成。'
+      Write-Host 'Go backend build completed.'
       return $exePath
     }
   }
 
-  throw '后端可执行文件不存在，且自动修复失败。请确认 backend\main.exe 已随仓库提供，或本机已安装 Go。'
+  throw 'Backend executable is missing and automatic recovery failed. Provide backend\main.exe or install Go.'
 }
 
 Ensure-Config
 $env:NASSAV_SERVER_PORT = "$Port"
 $backendExe = Resolve-BackendExe
 
-Write-Host "启动后端: http://127.0.0.1:$Port"
+Write-Host "Backend: http://127.0.0.1:$Port"
 & $backendExe
