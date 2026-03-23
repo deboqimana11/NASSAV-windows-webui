@@ -2,6 +2,8 @@ from src import downloaderMgr
 from src.comm import *
 from src import data
 import sys
+import os
+import subprocess
 import argparse
 from pathlib import Path
 from metadata import *
@@ -20,6 +22,14 @@ def append_if_not_duplicate(filename, new_content):
             file.write(new_content + '\n')
         return True
     return False
+
+
+def has_pending_queue_items(filename):
+    try:
+        with open(filename, 'r', encoding='utf-8') as file:
+            return any(line.strip() for line in file.readlines())
+    except FileNotFoundError:
+        return False
 
 
 if __name__ == "__main__":
@@ -108,6 +118,10 @@ if __name__ == "__main__":
     finally:
         with open(work_path, 'w', encoding='utf-8') as f:
             f.write("0")
+
+        if os.getenv('NASSAV_QUEUE_RUNNER') != '1' and has_pending_queue_items(queue_path):
+            logger.info("检测到待处理队列，开始自动执行下一项")
+            subprocess.Popen([sys.executable, 'queue_runner.py'], cwd=project_root)
 
 
 
