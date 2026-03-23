@@ -1,38 +1,55 @@
 <template>
-  <div id="app">
+  <div id="app" :class="{ 'app-detail': $route.name === 'detail' }">
     <header class="app-header">
-      <div class="header-container">
-        <router-link to="/" class="logo">
-          <div class="logo-mark">N</div>
-          <div class="logo-copy">
-            <h1>NASSAV</h1>
-            <p>Windows 本地片库</p>
+      <div class="header-backdrop"></div>
+      <div class="header-shell">
+        <div class="topbar">
+          <router-link to="/" class="brand">
+            <span class="brand-mark">N</span>
+            <span class="brand-copy">
+              <strong>NASSAV</strong>
+              <small>Private Screening Library</small>
+            </span>
+          </router-link>
+
+          <div class="topbar-side">
+            <div class="topbar-meta">
+              <span class="meta-pill">Windows WebUI</span>
+              <span class="meta-text">本地片库 / 下载队列 / 继续播放</span>
+            </div>
+
+            <div class="quick-add">
+              <label class="sr-only" for="avid-input">添加下载</label>
+              <input
+                id="avid-input"
+                v-model="inputContent"
+                type="text"
+                placeholder="输入车牌号，例如 JUQ-340"
+                class="quick-add-input"
+                @keyup.enter="handleAddVideo"
+              >
+              <button
+                class="quick-add-button"
+                @click="handleAddVideo"
+                :disabled="isAdding"
+              >
+                {{ isAdding ? '\u63d0\u4ea4\u4e2d...' : '\u52a0\u5165\u4e0b\u8f7d' }}
+              </button>
+            </div>
           </div>
-        </router-link>
-
-        <div class="search-box">
-          <input
-            v-model="inputContent"
-            type="text"
-            placeholder="输入车牌号，例如 IPZZ-776"
-            class="search-input"
-            @keyup.enter="handleAddVideo"
-          >
-          <button
-            class="search-button"
-            @click="handleAddVideo"
-            :disabled="isAdding"
-          >
-            {{ isAdding ? '提交中...' : '添加下载' }}
-          </button>
         </div>
+
+        <div class="subbar">
+          <p class="subbar-copy">像流媒体首页一样浏览你的本地片库，同时保留车牌直下和实时状态。</p>
+          <span class="subbar-tip">支持回车添加，首页自动刷新队列与片库</span>
+        </div>
+
+        <transition name="notice-fade">
+          <div v-if="notice.message" class="notice" :class="`notice-${notice.type}`">
+            {{ notice.message }}
+          </div>
+        </transition>
       </div>
-
-      <transition name="fade">
-        <div v-if="notice.message" class="notice" :class="`notice-${notice.type}`">
-          {{ notice.message }}
-        </div>
-      </transition>
     </header>
 
     <main class="app-main">
@@ -42,10 +59,6 @@
         </keep-alive>
       </router-view>
     </main>
-
-    <footer class="app-footer">
-      <p>© 2026 NASSAV，本机可用的 Windows 片库面板</p>
-    </footer>
   </div>
 </template>
 
@@ -97,7 +110,7 @@ export default {
           this.$router.push({ name: 'home' })
         }
       } catch (error) {
-        this.showNotice(error.message || '添加视频失败', 'error')
+        this.showNotice(error.message || '\u6dfb\u52a0\u89c6\u9891\u5931\u8d25', 'error')
       } finally {
         this.isAdding = false
       }
@@ -108,208 +121,315 @@ export default {
 
 <style>
 :root {
-  --rose-100: #fff1f1;
-  --rose-200: #ffd8dd;
-  --rose-300: #ffb1bd;
-  --rose-500: #d64b67;
-  --rose-700: #8a2037;
-  --ink-900: #2a1720;
-  --sand-50: #fffaf5;
-  --gold-400: #f4b860;
-  --success-bg: #edf9f0;
-  --success-text: #1f7a38;
-  --error-bg: #fff0f0;
-  --error-text: #b42318;
+  color-scheme: dark;
+  --bg: #090909;
+  --bg-soft: #111111;
+  --panel: rgba(20, 20, 20, 0.88);
+  --panel-strong: rgba(26, 26, 26, 0.96);
+  --panel-line: rgba(255, 255, 255, 0.08);
+  --text: #e6dfd5;
+  --text-muted: #b5aea3;
+  --text-soft: #8f877c;
+  --accent: #d31f2b;
+  --accent-soft: #f07b53;
+  --success-bg: rgba(28, 68, 42, 0.82);
+  --success-text: #d2f3dc;
+  --error-bg: rgba(86, 24, 28, 0.84);
+  --error-text: #ffd7d9;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  background: var(--bg);
+}
+
 body {
   margin: 0;
-  padding: 0;
-  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-  color: var(--ink-900);
+  min-width: 320px;
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  color: rgba(230, 223, 213, 0.88);
   background:
-    radial-gradient(circle at top left, rgba(255, 177, 189, 0.4), transparent 24%),
-    linear-gradient(180deg, #fff8f4 0%, #fffdf9 100%);
+    radial-gradient(circle at 12% 18%, rgba(211, 31, 43, 0.22), transparent 24%),
+    radial-gradient(circle at 88% 16%, rgba(240, 123, 83, 0.12), transparent 26%),
+    linear-gradient(180deg, #1a090a 0%, #0c0c0c 26%, #090909 100%);
+}
+
+button,
+input {
+  font: inherit;
 }
 
 #app {
-  display: flex;
-  flex-direction: column;
   min-height: 100vh;
 }
 
 .app-header {
-  color: white;
-  background:
-    linear-gradient(120deg, rgba(138, 32, 55, 0.96), rgba(214, 75, 103, 0.92)),
-    linear-gradient(45deg, rgba(244, 184, 96, 0.18), transparent);
-  box-shadow: 0 10px 28px rgba(138, 32, 55, 0.14);
+  position: relative;
+  overflow: clip;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.header-container {
+.header-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.38) 0%, rgba(0, 0, 0, 0.72) 100%),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.54) 42%, rgba(0, 0, 0, 0.86) 100%),
+    radial-gradient(circle at 84% 32%, rgba(211, 31, 43, 0.24), transparent 24%);
+}
+
+.header-shell {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 1440px);
+  margin: 0 auto;
+  padding: clamp(0.9rem, 1.4vw, 1.1rem) clamp(1rem, 3vw, 2rem) clamp(0.8rem, 1.8vw, 1rem);
+}
+
+.topbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1rem 1.4rem;
+  align-items: center;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.9rem;
+  text-decoration: none;
+  color: rgba(230, 223, 213, 0.88);
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 2.45rem;
+  height: 2.45rem;
+  border-radius: 0.8rem;
+  background: linear-gradient(180deg, #f4463d 0%, #970c18 100%);
+  box-shadow: 0 12px 30px rgba(211, 31, 43, 0.28);
+  font-family: 'Arial Narrow', 'Impact', sans-serif;
+  font-size: 1.55rem;
+  letter-spacing: 0.08em;
+}
+
+.brand-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.02rem;
+}
+
+.brand-copy strong {
+  font-family: 'Arial Narrow', 'Impact', sans-serif;
+  font-size: 1.9rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+
+.brand-copy small {
+  color: var(--text-soft);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.topbar-side {
+  display: grid;
+  grid-template-columns: auto minmax(320px, 520px);
+  gap: 0.9rem;
+  align-items: center;
+  justify-content: end;
+}
+
+.topbar-meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.7rem;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+}
+
+.meta-pill {
+  padding: 0.33rem 0.62rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(230, 223, 213, 0.88);
+}
+
+.quick-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  padding: 0.42rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1rem;
+  background: linear-gradient(180deg, rgba(20, 20, 20, 0.9) 0%, rgba(12, 12, 12, 0.94) 100%);
+}
+
+.quick-add-input {
+  min-width: 0;
+  height: 2.7rem;
+  padding: 0 0.95rem;
+  border: none;
+  border-radius: 0.75rem;
+  outline: none;
+  color: rgba(230, 223, 213, 0.88);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.quick-add-input::placeholder {
+  color: #91897f;
+}
+
+.quick-add-input:focus {
+  box-shadow: 0 0 0 3px rgba(240, 123, 83, 0.14);
+}
+
+.quick-add-button {
+  height: 2.7rem;
+  padding: 0 1rem;
+  border: none;
+  border-radius: 0.8rem;
+  cursor: pointer;
+  color: white;
+  font-weight: 800;
+  background: linear-gradient(135deg, #e61d2b 0%, #9d0615 100%);
+  transition: transform 0.22s ease, box-shadow 0.22s ease, opacity 0.22s ease;
+  box-shadow: 0 14px 30px rgba(211, 31, 43, 0.24);
+}
+
+.quick-add-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 34px rgba(211, 31, 43, 0.32);
+}
+
+.quick-add-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.subbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
-  max-width: 1360px;
-  margin: 0 auto;
-  padding: 0.9rem 1.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.logo {
-  display: flex;
-  align-items: center;
-  gap: 0.8rem;
-  color: white;
-  text-decoration: none;
-  min-width: 0;
-}
-
-.logo-mark {
-  width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  font-size: 1.2rem;
-  font-weight: 700;
-  color: var(--rose-700);
-  background: linear-gradient(145deg, #fff7e6, #ffd9de);
-}
-
-.logo-copy h1 {
+.subbar-copy {
   margin: 0;
-  font-size: 1.35rem;
-  line-height: 1.1;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
 }
 
-.logo-copy p {
-  margin: 0.1rem 0 0;
-  font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.78);
-}
-
-.search-box {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  width: min(100%, 460px);
-}
-
-.search-input {
-  flex: 1;
-  min-width: 0;
-  height: 40px;
-  padding: 0 0.95rem;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 12px;
-  outline: none;
-  font-size: 0.92rem;
-  color: var(--ink-900);
-  background: rgba(255, 250, 245, 0.96);
-}
-
-.search-input::placeholder {
-  color: #b77a86;
-}
-
-.search-input:focus {
-  border-color: rgba(244, 184, 96, 0.7);
-  box-shadow: 0 0 0 4px rgba(244, 184, 96, 0.14);
-}
-
-.search-button {
-  flex-shrink: 0;
-  height: 40px;
-  padding: 0 1rem;
-  border: none;
-  border-radius: 12px;
-  cursor: pointer;
-  font-weight: 700;
-  color: var(--rose-700);
-  background: linear-gradient(135deg, #ffe7ac, #ffc97d);
-  transition: transform 0.2s ease, opacity 0.2s ease;
-}
-
-.search-button:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.search-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.7;
+.subbar-tip {
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  white-space: nowrap;
 }
 
 .notice {
-  max-width: 1360px;
-  margin: 0 auto 0.85rem;
-  padding: 0.75rem 1rem;
-  border-radius: 12px;
+  margin-top: 0.85rem;
+  padding: 0.85rem 1rem;
+  border-radius: 1rem;
   font-size: 0.92rem;
 }
 
 .notice-success {
-  color: var(--success-text);
   background: var(--success-bg);
+  color: var(--success-text);
 }
 
 .notice-error {
-  color: var(--error-text);
   background: var(--error-bg);
+  color: var(--error-text);
 }
 
 .notice-info {
-  color: var(--rose-700);
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(230, 223, 213, 0.88);
 }
 
 .app-main {
-  flex: 1;
-  width: 100%;
-  max-width: 1360px;
+  width: min(100%, 1440px);
   margin: 0 auto;
-  padding: 1.4rem 1.5rem 3rem;
+  padding: clamp(1rem, 2.4vw, 1.6rem) clamp(1rem, 3vw, 2rem) 3rem;
 }
 
-.app-footer {
-  text-align: center;
-  padding: 0.9rem;
-  color: white;
-  background: linear-gradient(135deg, #65192a, #9f2944);
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.25s ease, transform 0.25s ease;
+.notice-fade-enter-active,
+.notice-fade-leave-active {
+  transition: opacity 0.24s ease, transform 0.24s ease;
 }
 
-.fade-enter-from,
-.fade-leave-to {
+.notice-fade-enter-from,
+.notice-fade-leave-to {
   opacity: 0;
   transform: translateY(-6px);
 }
 
-@media (max-width: 768px) {
-  .header-container {
-    flex-direction: column;
-    align-items: stretch;
-    padding: 0.9rem 1rem;
+@media (max-width: 1080px) {
+  .topbar-side {
+    grid-template-columns: 1fr;
+    justify-content: stretch;
   }
 
-  .search-box {
+  .topbar-meta {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 820px) {
+  .topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .subbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .topbar-meta {
+    flex-wrap: wrap;
+  }
+
+  .quick-add {
+    grid-template-columns: 1fr;
+  }
+
+  .quick-add-button {
     width: 100%;
   }
 
-  .app-main {
-    padding: 1rem 1rem 2rem;
+  .brand-copy strong {
+    font-size: 1.8rem;
   }
 
-  .notice {
-    margin: 0 1rem 0.9rem;
+  .subbar-tip {
+    white-space: normal;
   }
 }
 </style>
+

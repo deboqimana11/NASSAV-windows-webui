@@ -1,53 +1,93 @@
 <template>
-  <div class="container">
-    <div class="hero">
-      <div>
-        <p class="eyebrow">本地片库</p>
-        <h1>已入库 {{ videos.length }} 部</h1>
-        <p class="subtitle">点击封面进入详情页，支持直接播放本地视频。</p>
-      </div>
-      <div class="hero-actions">
-        <span class="polling-indicator">{{ pollingLabel }}</span>
-        <button class="refresh-button" @click="refreshEverything()" :disabled="loading">
-          {{ loading ? '刷新中...' : '刷新列表' }}
-        </button>
-      </div>
-    </div>
+  <div class="home-page">
+    <section v-if="featuredVideo" class="spotlight-grid">
+      <article class="spotlight-panel" @click="navigateToDetail(featuredVideo.id)">
+        <div class="spotlight-backdrop">
+          <img v-if="featuredVideo.poster" :src="featuredVideo.poster" :alt="featuredVideo.title">
+        </div>
+        <div class="spotlight-overlay"></div>
+        <div class="spotlight-content">
+          <p class="spotlight-kicker">继续浏览</p>
+          <h2>{{ featuredVideo.id }}</h2>
+          <p class="spotlight-title">{{ featuredVideo.title }}</p>
+          <div class="spotlight-actions">
+            <button class="spotlight-button spotlight-button-primary" @click.stop="navigateToDetail(featuredVideo.id)">播放详情</button>
+            <button class="spotlight-button spotlight-button-secondary" @click.stop="refreshEverything()" :disabled="loading">
+              {{ loading ? '\u540c\u6b65\u4e2d...' : '\u5237\u65b0\u7247\u5e93' }}
+            </button>
+          </div>
+        </div>
+      </article>
 
-    <section class="status-strip">
-      <div class="status-item status-item-download">
-        <span class="status-name">下载中</span>
-        <strong class="status-value">{{ downloadStatus.active ? downloadStatus.current : '空闲' }}</strong>
-        <div v-if="downloadStatus.active && downloadStatus.progress" class="download-progress">
-          <div class="download-progress-meta">
-            <span>{{ progressPhaseLabel }}</span>
-            <span>{{ progressSummary }}</span>
-          </div>
-          <div class="download-progress-bar">
-            <span class="download-progress-fill" :style="{ width: `${progressPercent}%` }"></span>
+      <aside class="status-rail">
+        <div class="rail-card rail-card-primary">
+          <span class="rail-label">当前状态</span>
+          <strong class="rail-headline">{{ statusHeadline }}</strong>
+          <p class="rail-text">{{ statusDescription }}</p>
+
+          <div v-if="downloadStatus.active && downloadStatus.progress" class="download-progress">
+            <div class="download-progress-meta">
+              <span>{{ progressPhaseLabel }}</span>
+              <span>{{ progressSummary }}</span>
+            </div>
+            <div class="download-progress-bar">
+              <span class="download-progress-fill" :style="{ width: `${progressPercent}%` }"></span>
+            </div>
           </div>
         </div>
-      </div>
-      <div class="status-item">
-        <span class="status-name">排队</span>
-        <strong class="status-value">{{ downloadStatus.queueCount }} 个</strong>
-      </div>
-      <div class="status-item status-queue" v-if="downloadStatus.queue.length">
-        <span class="status-name">队列</span>
-        <div class="queue-inline">
-          <span v-for="item in downloadStatus.queue.slice(0, 5)" :key="item" class="queue-chip">{{ item }}</span>
+
+        <div class="rail-stats">
+          <div class="rail-stat">
+            <span>排队</span>
+            <strong>{{ downloadStatus.queueCount }}</strong>
+          </div>
+          <div class="rail-stat">
+            <span>片库</span>
+            <strong>{{ videos.length }}</strong>
+          </div>
+          <div class="rail-stat">
+            <span>刷新</span>
+            <strong>{{ pollingLabel }}</strong>
+          </div>
         </div>
+
+        <div v-if="downloadStatus.queue.length" class="queue-inline">
+          <span class="queue-inline-label">队列</span>
+          <div class="queue-inline-list">
+            <span v-for="item in downloadStatus.queue.slice(0, 6)" :key="item" class="queue-chip">{{ item }}</span>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="shelf-toolbar">
+      <div>
+        <p class="shelf-kicker">Library</p>
+        <h3>全部影片</h3>
+      </div>
+      <div class="shelf-toolbar-meta">
+        <span>共 {{ videos.length }} 部</span>
       </div>
     </section>
 
-    <div v-if="loading" class="status-card">正在加载本地片库...</div>
+    <div v-if="loading" class="status-card">正在同步本地片库...</div>
     <div v-else-if="error" class="status-card status-error">{{ error }}</div>
-    <div v-else-if="!videos.length" class="status-card">还没有视频，先在顶部添加一个车牌号试试。</div>
+    <div v-else-if="!videos.length" class="status-card empty-state">
+      <strong>片库还是空的</strong>
+      <span>先在顶部输入车牌号，把第一部影片加入你的私人片单。</span>
+    </div>
 
     <template v-else>
-      <div class="video-grid">
-        <VideoCard v-for="video in paginatedVideos" :key="video.id" :video="video" @click="navigateToDetail(video.id)" />
-      </div>
+      <section class="video-shelf">
+        <VideoCard
+          v-for="(video, index) in paginatedVideos"
+          :key="video.id"
+          :video="video"
+          :eyebrow="video.id"
+          :index-label="String((currentPage - 1) * PAGE_SIZE + index + 1).padStart(2, '0')"
+          @click="navigateToDetail(video.id)"
+        />
+      </section>
 
       <div v-if="totalPages > 1" class="pagination">
         <button class="page-button" @click="goToPrevPage" :disabled="currentPage === 1">上一页</button>
@@ -64,7 +104,17 @@ import videosApi from '../api/videos'
 
 const ACTIVE_STATUS_POLL_MS = 2000
 const IDLE_STATUS_POLL_MS = 6000
-const PAGE_SIZE = 24
+const PAGE_SIZE = 18
+
+function createDefaultStatus() {
+  return {
+    active: false,
+    current: '',
+    queue: [],
+    queueCount: 0,
+    progress: null
+  }
+}
 
 export default {
   name: 'HomeView',
@@ -72,27 +122,46 @@ export default {
   data() {
     return {
       videos: [],
-      downloadStatus: {
-        active: false,
-        current: '',
-        queue: [],
-        queueCount: 0
-      },
+      downloadStatus: createDefaultStatus(),
       scrollPosition: 0,
       loading: false,
       error: '',
       pollTimer: null,
-      lastUpdatedAt: null,
-      currentPage: 1,
-      wasDownloadActive: false
+      lastUpdatedAt: '',
+      statusUpdatedAt: '',
+      currentPage: 1
     }
   },
   computed: {
-    pollingLabel() {
-      if (!this.lastUpdatedAt) {
-        return '自动轮询开启'
+    featuredVideo() {
+      return this.videos[0] || null
+    },
+    statusHeadline() {
+      if (this.downloadStatus.active) {
+        return '\u4e0b\u8f7d\u8fdb\u884c\u4e2d'
       }
-      return `更新于 ${this.lastUpdatedAt}`
+      if (this.downloadStatus.queueCount) {
+        return '\u7b49\u5f85\u5f00\u59cb'
+      }
+      return '\u7247\u5e93\u7a7a\u95f2'
+    },
+    statusDescription() {
+      if (this.downloadStatus.active) {
+        return this.downloadStatus.current || '\u6b63\u5728\u51c6\u5907\u4e0b\u8f7d\u4efb\u52a1'
+      }
+      if (this.downloadStatus.queueCount) {
+        return `\u961f\u5217\u4e2d\u8fd8\u6709 ${this.downloadStatus.queueCount} \u4e2a\u4efb\u52a1`
+      }
+      return '\u73b0\u5728\u53ef\u4ee5\u76f4\u63a5\u7ee7\u7eed\u6d4f\u89c8\u6216\u52a0\u5165\u65b0\u4efb\u52a1'
+    },
+    pollingLabel() {
+      if (this.downloadStatus.active && this.statusUpdatedAt) {
+        return this.statusUpdatedAt
+      }
+      if (this.lastUpdatedAt) {
+        return this.lastUpdatedAt
+      }
+      return '\u81ea\u52a8'
     },
     totalPages() {
       return Math.max(1, Math.ceil(this.videos.length / PAGE_SIZE))
@@ -106,11 +175,11 @@ export default {
     },
     progressPhaseLabel() {
       const phase = this.downloadStatus.progress?.phase
-      if (phase === 'downloading') return '下载中'
-      if (phase === 'finalizing') return '封装中'
-      if (phase === 'completed') return '已完成'
-      if (phase === 'failed') return '下载失败'
-      return '准备中'
+      if (phase === 'downloading') return '\u4e0b\u8f7d\u4e2d'
+      if (phase === 'finalizing') return '\u5c01\u88c5\u4e2d'
+      if (phase === 'completed') return '\u5df2\u5b8c\u6210'
+      if (phase === 'failed') return '\u4e0b\u8f7d\u5931\u8d25'
+      return '\u51c6\u5907\u4e2d'
     },
     progressSummary() {
       const progress = this.downloadStatus.progress
@@ -135,7 +204,6 @@ export default {
   },
   async created() {
     await this.refreshEverything()
-    this.wasDownloadActive = this.downloadStatus.active
     window.addEventListener('videos:refresh', this.handleExternalRefresh)
     document.addEventListener('visibilitychange', this.handleVisibilityChange)
     this.startPolling()
@@ -157,13 +225,18 @@ export default {
     next()
   },
   methods: {
-    stampUpdatedAt() {
-      const now = new Date()
-      this.lastUpdatedAt = now.toLocaleTimeString('zh-CN', {
+    formatTimestamp(date = new Date()) {
+      return date.toLocaleTimeString('zh-CN', {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit'
       })
+    },
+    stampVideosUpdatedAt() {
+      this.lastUpdatedAt = this.formatTimestamp()
+    },
+    stampStatusUpdatedAt() {
+      this.statusUpdatedAt = this.formatTimestamp()
     },
     async loadVideos(options = {}) {
       const { silent = false } = options
@@ -182,13 +255,13 @@ export default {
         if (this.currentPage > this.totalPages) {
           this.currentPage = this.totalPages
         }
-        this.stampUpdatedAt()
+        this.stampVideosUpdatedAt()
         if (silent) {
           this.error = ''
         }
       } catch (error) {
         if (!silent) {
-          this.error = error.message || '加载视频列表失败'
+          this.error = error.message || '\u52a0\u8f7d\u89c6\u9891\u5217\u8868\u5931\u8d25'
         }
       } finally {
         if (!silent) {
@@ -199,14 +272,9 @@ export default {
     async loadStatus() {
       try {
         this.downloadStatus = await videosApi.getDownloadStatus()
+        this.stampStatusUpdatedAt()
       } catch {
-        this.downloadStatus = {
-          active: false,
-          current: '',
-          queue: [],
-          queueCount: 0,
-          progress: null
-        }
+        this.downloadStatus = createDefaultStatus()
       }
     },
     async refreshEverything(options = {}) {
@@ -250,7 +318,6 @@ export default {
         await this.loadVideos({ silent: true })
       }
 
-      this.wasDownloadActive = this.downloadStatus.active
       this.scheduleNextPoll()
     },
     handleVisibilityChange() {
@@ -300,108 +367,198 @@ export default {
 </script>
 
 <style scoped>
-.container {
-  padding: 0.2rem 0 1rem;
+.home-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
 }
 
-.hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: end;
+.spotlight-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(300px, 0.85fr);
   gap: 1rem;
-  margin-bottom: 1rem;
+  align-items: stretch;
 }
 
-.hero-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.eyebrow {
-  margin: 0 0 0.3rem;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: #b8606d;
-}
-
-h1 {
-  margin: 0;
-  color: #381821;
-  font-size: clamp(1.55rem, 2.5vw, 2.2rem);
-}
-
-.subtitle {
-  margin: 0.35rem 0 0;
-  color: #7f5660;
-  font-size: 0.95rem;
-}
-
-.polling-indicator {
-  display: inline-flex;
-  align-items: center;
-  height: 38px;
-  padding: 0 0.85rem;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.74);
-  color: #8a2037;
-  font-size: 0.84rem;
-  white-space: nowrap;
-}
-
-.refresh-button {
-  height: 38px;
-  padding: 0 0.95rem;
-  border: 1px solid #efc5ca;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.9);
-  color: #8a2037;
-  font-weight: 700;
+.spotlight-panel {
+  position: relative;
+  min-height: clamp(210px, 26vw, 280px);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 1.6rem;
+  background: #0f0f0f;
   cursor: pointer;
 }
 
-.status-strip {
-  display: flex;
-  align-items: center;
-  gap: 0.9rem;
-  padding: 0.75rem 0.9rem;
-  margin-bottom: 1.25rem;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+.spotlight-backdrop,
+.spotlight-backdrop img,
+.spotlight-overlay {
+  position: absolute;
+  inset: 0;
 }
 
-.status-item {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  min-width: 0;
+.spotlight-backdrop img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: saturate(0.88) brightness(0.7);
 }
 
-.status-item-download {
+.spotlight-overlay {
+  background:
+    linear-gradient(90deg, rgba(10, 10, 10, 0.96) 0%, rgba(10, 10, 10, 0.72) 36%, rgba(10, 10, 10, 0.32) 62%, rgba(10, 10, 10, 0.92) 100%),
+    linear-gradient(180deg, rgba(10, 10, 10, 0.18) 0%, rgba(10, 10, 10, 0.84) 100%);
+}
+
+.spotlight-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  min-width: min(360px, 100%);
+  justify-content: flex-end;
+  height: 100%;
+  max-width: min(32rem, 72%);
+  padding: clamp(1.05rem, 2vw, 1.4rem);
 }
 
-.status-name {
-  color: #9c6671;
-  font-size: 0.82rem;
+.spotlight-kicker,
+.shelf-kicker {
+  margin: 0 0 0.35rem;
+  color: #ffb37c;
+  font-size: 0.72rem;
   font-weight: 700;
-  white-space: nowrap;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
-.status-value {
-  color: #381821;
-  font-size: 0.92rem;
+.spotlight-content h2 {
+  margin: 0;
+  font-family: 'Arial Narrow', 'Impact', sans-serif;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 0.9;
+  letter-spacing: 0.04em;
 }
 
-.status-queue {
-  flex: 1;
+.spotlight-title {
+  margin: 0.55rem 0 0;
+  color: rgba(230, 223, 213, 0.82);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.spotlight-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 0.95rem;
+}
+
+.spotlight-button {
+  min-width: 6.8rem;
+  height: 2.5rem;
+  padding: 0 0.95rem;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.spotlight-button-primary {
+  color: white;
+  background: linear-gradient(135deg, #e61d2b 0%, #9d0615 100%);
+}
+
+.spotlight-button-secondary {
+  color: rgba(230, 223, 213, 0.88);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.status-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.rail-card {
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 1.35rem;
+  background: linear-gradient(180deg, rgba(18, 18, 18, 0.96) 0%, rgba(12, 12, 12, 0.96) 100%);
+}
+
+.rail-label {
+  display: block;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.rail-headline {
+  display: block;
+  margin-top: 0.45rem;
+  color: rgba(230, 223, 213, 0.88);
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.rail-text {
+  margin: 0.35rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.rail-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.rail-stat {
+  padding: 0.8rem 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 1.1rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.rail-stat span {
+  display: block;
+  color: var(--text-soft);
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.rail-stat strong {
+  display: block;
+  margin-top: 0.35rem;
+  color: rgba(230, 223, 213, 0.88);
+  font-size: 0.95rem;
+  font-weight: 800;
+  line-height: 1.35;
 }
 
 .queue-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.queue-inline-label {
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.queue-inline-list {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
@@ -410,62 +567,99 @@ h1 {
 .queue-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
-  padding: 0 0.7rem;
+  min-height: 1.9rem;
+  padding: 0 0.72rem;
   border-radius: 999px;
-  background: #fff3f4;
-  color: #9f2944;
-  font-size: 0.8rem;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-muted);
+  font-size: 0.78rem;
   font-weight: 700;
 }
 
 .download-progress {
-  width: min(320px, 100%);
-  margin-top: 0.2rem;
+  margin-top: 0.8rem;
 }
 
 .download-progress-meta {
   display: flex;
   justify-content: space-between;
-  gap: 0.8rem;
-  color: #8e6570;
-  font-size: 0.76rem;
+  gap: 0.7rem;
+  color: var(--text-soft);
+  font-size: 0.72rem;
 }
 
 .download-progress-bar {
   position: relative;
   height: 4px;
   margin-top: 0.35rem;
-  border-radius: 999px;
-  background: rgba(191, 120, 134, 0.18);
   overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .download-progress-fill {
   display: block;
   height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ff7e45 0%, #d31f2b 100%);
+}
+
+.shelf-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 1rem;
+  padding-top: 0.25rem;
+}
+
+.shelf-toolbar h3 {
+  margin: 0;
+  font-size: clamp(1.35rem, 2vw, 1.8rem);
+}
+
+.shelf-toolbar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
+.shelf-toolbar-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0 0.72rem;
   border-radius: 999px;
-  background: linear-gradient(90deg, #c96376 0%, #8a2037 100%);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .status-card {
-  padding: 1rem 1.1rem;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.86);
-  color: #7b4a56;
-  box-shadow: 0 10px 24px rgba(138, 32, 55, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 1.1rem 1.2rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.2rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
 }
 
 .status-error {
-  color: #b42318;
-  background: #fff1f1;
+  color: #ffd0d4;
+  background: rgba(100, 26, 33, 0.42);
 }
 
-.video-grid {
+.empty-state strong {
+  color: rgba(230, 223, 213, 0.88);
+  font-size: 1.05rem;
+}
+
+.video-shelf {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
-  gap: 16px;
-  padding: 0.2rem 0 0;
+  grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+  row-gap: 1.6rem;
+  column-gap: 0.95rem;
 }
 
 .pagination {
@@ -473,67 +667,77 @@ h1 {
   justify-content: center;
   align-items: center;
   gap: 0.9rem;
-  margin-top: 1.2rem;
+  margin-top: 0.85rem;
+  padding-top: 0.4rem;
 }
 
 .page-button {
-  min-width: 88px;
-  height: 38px;
-  padding: 0 0.95rem;
-  border: 1px solid #efc5ca;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.94);
-  color: #8a2037;
+  min-width: 92px;
+  height: 2.65rem;
+  padding: 0 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(230, 223, 213, 0.88);
   font-weight: 700;
   cursor: pointer;
 }
 
 .page-button:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 .page-summary {
-  color: #7f5660;
-  font-size: 0.92rem;
+  color: var(--text-soft);
+  font-size: 0.9rem;
   font-weight: 700;
 }
 
-@media (max-width: 768px) {
-  .hero {
-    flex-direction: column;
-    align-items: stretch;
+@media (max-width: 1040px) {
+  .spotlight-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .spotlight-panel {
+    min-height: 220px;
   }
 
-  .hero-actions {
-    flex-direction: column;
-    align-items: stretch;
+  .spotlight-content {
+    max-width: 100%;
   }
 
-  .status-strip {
-    flex-direction: column;
-    align-items: stretch;
+  .spotlight-overlay {
+    background: linear-gradient(180deg, rgba(10, 10, 10, 0.22) 0%, rgba(10, 10, 10, 0.72) 56%, rgba(10, 10, 10, 0.95) 100%);
   }
 
-  .status-item {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 0.3rem;
-  }
-
-  .polling-indicator,
-  .refresh-button {
+  .spotlight-actions {
     width: 100%;
-    justify-content: center;
   }
 
-  .video-grid {
-    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
-    gap: 14px;
+  .spotlight-button {
+    flex: 1;
+  }
+
+  .rail-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .shelf-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .video-shelf {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 1.3rem;
+    column-gap: 0.8rem;
   }
 
   .pagination {
-    gap: 0.65rem;
+    gap: 0.6rem;
   }
 
   .page-button {
@@ -541,4 +745,3 @@ h1 {
   }
 }
 </style>
-
