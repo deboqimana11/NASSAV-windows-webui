@@ -2,9 +2,7 @@
   <div class="detail-container" v-if="video">
     <div class="header">
       <div>
-        <p class="eyebrow">视频详情</p>
-        <h1>{{ video.title }}</h1>
-        <p class="release-date">发行日期: {{ video.releaseDate || '未知' }}</p>
+        <router-link class="back-link back-link-mobile" to="/">返回首页</router-link>
       </div>
       <router-link class="back-link" to="/">返回首页</router-link>
     </div>
@@ -27,16 +25,29 @@
       </div>
     </section>
 
-    <div class="content-grid">
-      <aside class="poster-panel">
-        <img :src="video.poster" :alt="video.title">
-        <div class="poster-meta">
-          <div class="meta-label">状态</div>
-          <div class="meta-value">{{ video.videoFile ? '可直接播放' : '仅展示元数据' }}</div>
+    <section class="info-panel">
+      <div class="title-block">
+        <h1>{{ video.title }}</h1>
+        <p class="release-date">发行日期: {{ video.releaseDate || '未知' }}</p>
+      </div>
+      <div class="meta-row">
+        <div class="meta-card">
+          <span class="meta-label">状态</span>
+          <strong class="meta-value">{{ video.videoFile ? '可直接播放' : '仅展示元数据' }}</strong>
         </div>
+        <div class="meta-card">
+          <span class="meta-label">图集</span>
+          <strong class="meta-value">{{ video.fanarts?.length || 0 }} 张</strong>
+        </div>
+      </div>
+    </section>
+
+    <div class="content-grid">
+      <aside class="poster-panel" v-if="video.poster">
+        <img :src="video.poster" :alt="video.title">
       </aside>
 
-      <section class="gallery-panel">
+      <section class="gallery-panel" :class="{ 'gallery-panel-full': !video.poster }">
         <Gallery :images="video.fanarts" />
       </section>
     </div>
@@ -74,29 +85,9 @@ export default {
 .header {
   display: flex;
   justify-content: space-between;
-  align-items: start;
+  align-items: center;
   gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-.eyebrow {
-  margin: 0 0 0.45rem;
-  font-size: 0.82rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: #b8606d;
-}
-
-.header h1 {
-  margin: 0;
-  color: #2f1820;
-  font-size: clamp(1.6rem, 2.8vw, 2.4rem);
-}
-
-.release-date {
-  margin: 0.65rem 0 0;
-  color: #a04657;
-  font-size: 0.98rem;
+  margin-bottom: 1rem;
 }
 
 .back-link {
@@ -112,8 +103,12 @@ export default {
   white-space: nowrap;
 }
 
+.back-link-mobile {
+  display: none;
+}
+
 .player-section {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .video-player {
@@ -137,6 +132,56 @@ export default {
   background: #fff5f5;
 }
 
+.info-panel {
+  margin-bottom: 1.4rem;
+  padding: 1.1rem 1.2rem;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #fff7f8 0%, #fffdfb 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.78), 0 10px 24px rgba(138, 32, 55, 0.08);
+}
+
+.title-block h1 {
+  margin: 0;
+  color: #2f1820;
+  font-size: clamp(1.45rem, 2.5vw, 2.1rem);
+  line-height: 1.35;
+}
+
+.release-date {
+  margin: 0.7rem 0 0;
+  color: #a04657;
+  font-size: 0.98rem;
+}
+
+.meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  margin-top: 1rem;
+}
+
+.meta-card {
+  min-width: 160px;
+  padding: 0.85rem 0.95rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.meta-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #b8606d;
+}
+
+.meta-value {
+  display: block;
+  margin-top: 0.45rem;
+  color: #381821;
+  font-size: 0.98rem;
+}
+
 .content-grid {
   display: grid;
   grid-template-columns: minmax(240px, 300px) 1fr;
@@ -145,8 +190,6 @@ export default {
 }
 
 .poster-panel {
-  position: sticky;
-  top: 96px;
   padding: 1rem;
   border-radius: 20px;
   background: linear-gradient(180deg, #fff7f8 0%, #fffdfb 100%);
@@ -160,34 +203,17 @@ export default {
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
 }
 
-.poster-meta {
-  margin-top: 1rem;
-}
-
-.meta-label {
-  font-size: 0.82rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: #b8606d;
-}
-
-.meta-value {
-  margin-top: 0.35rem;
-  color: #381821;
-  font-weight: 700;
-}
-
 .gallery-panel {
   min-width: 0;
+}
+
+.gallery-panel-full {
+  grid-column: 1 / -1;
 }
 
 @media (max-width: 900px) {
   .content-grid {
     grid-template-columns: 1fr;
-  }
-
-  .poster-panel {
-    position: static;
   }
 }
 
@@ -198,16 +224,34 @@ export default {
   }
 
   .header {
-    flex-direction: column;
+    margin-bottom: 0.85rem;
   }
 
   .back-link {
+    display: none;
+  }
+
+  .back-link-mobile {
+    display: inline-flex;
+    margin-top: 0.65rem;
     width: 100%;
     justify-content: center;
   }
 
   .player {
     max-height: none;
+  }
+
+  .info-panel {
+    padding: 1rem;
+  }
+
+  .meta-row {
+    flex-direction: column;
+  }
+
+  .meta-card {
+    width: 100%;
   }
 }
 </style>

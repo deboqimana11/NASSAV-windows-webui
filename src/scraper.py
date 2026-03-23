@@ -119,6 +119,10 @@ class Sracper:
 
         if not metadata:
             return None
+
+        if not metadata.release_date:
+            metadata.release_date = self._resolve_release_date(metadata.avid, html, source)
+
         logger.info(f"parse metadata succ: \n{metadata}")
 
         if not self.downloadIMG(metadata):
@@ -230,6 +234,7 @@ class Sracper:
             metadata.cover = og_image_match.group(1).strip() if og_image_match else ''
             metadata.description = (desc_match.group(1).strip() if desc_match else '') or raw_title
             metadata.keywords = ['Jable']
+            metadata.release_date = self._extract_release_date_from_text(html)
 
             if video_id_match:
                 metadata.keywords.append(f'videoId:{video_id_match.group(1)}')
@@ -250,6 +255,47 @@ class Sracper:
         except Exception as e:
             logger.error(f"Jable 本地页面解析失败: {e}")
             return None
+
+    def _extract_release_date_from_text(self, text: str) -> str:
+        patterns = [
+            r'<meta property="og:video:release_date" content="([^\"]+)"',
+            r'日期[^0-9]{0,20}(20\d{2}-\d{2}-\d{2})',
+            r'日期[^0-9]{0,20}(20\d{2}/\d{2}/\d{2})',
+            r'公開日[^0-9]{0,20}(20\d{2}-\d{2}-\d{2})',
+            r'發行日期[^0-9]{0,20}(20\d{2}-\d{2}-\d{2})',
+            r'发行日期[^0-9]{0,20}(20\d{2}-\d{2}-\d{2})',
+            r'(20\d{2}-\d{2}-\d{2})'
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if not match:
+                continue
+            value = match.group(1).strip().replace('/', '-')
+            if re.match(r'^20\d{2}-\d{2}-\d{2}$', value):
+                return value
+        return ''
+
+    def _resolve_release_date(self, avid: str, html: str, source: str) -> str:
+        local_date = self._extract_release_date_from_text(html)
+        if local_date:
+            return local_date
+
+        candidate_domains = []
+        for domain in [self.domain, *scraper_domains]:
+            if domain and domain not in candidate_domains:
+                candidate_domains.append(domain)
+
+        for domain in candidate_domains:
+            fallback_url = f'https://{domain}/{avid}'
+            fallback_html = self._fetch_html(fallback_url, referer=f'https://{domain}/')
+            if not fallback_html:
+                continue
+            bus_date = self._extract_release_date_from_text(fallback_html)
+            if bus_date:
+                logger.info(f'通过 {domain} 回填发行日期: {avid} -> {bus_date}')
+                return bus_date
+        return ''
 
     def downloadIMG(self, metadata: AVMetadata) -> bool:
         prefix = metadata.avid + '-'
@@ -460,3 +506,7 @@ class Sracper:
         cropped_img = img.crop((left, top, right, bottom))
         cropped_img.save(os.path.join(self.path, optname))
         logger.debug(f'裁剪完成，尺寸: {cropped_img.size}')
+
+
+
+
