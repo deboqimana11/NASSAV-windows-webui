@@ -67,7 +67,24 @@ export default {
     }
   },
   async created() {
-    this.video = await videosApi.getVideoDetail(this.id)
+    await this.loadVideo()
+  },
+  watch: {
+    id() {
+      this.loadVideo()
+    }
+  },
+  methods: {
+    scrollToTop() {
+      window.scrollTo({ top: 0, behavior: 'auto' })
+    },
+    async loadVideo() {
+      this.scrollToTop()
+      this.video = await videosApi.getVideoDetail(this.id)
+      this.$nextTick(() => {
+        this.scrollToTop()
+      })
+    }
   }
 }
 </script>
