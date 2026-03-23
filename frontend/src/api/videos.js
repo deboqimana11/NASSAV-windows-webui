@@ -1,7 +1,33 @@
 import axios from 'axios'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:31471'
 const API_KEY = import.meta.env.VITE_API_KEY || 'IBHUSDBWQHJEJOBDSW'
+
+function resolveApiBase() {
+  const configured = (import.meta.env.VITE_API_BASE || '').trim()
+
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    const currentHost = window.location.hostname
+    const currentProtocol = window.location.protocol
+
+    if (configured) {
+      try {
+        const configuredUrl = new URL(configured)
+        const loopbackHosts = new Set(['127.0.0.1', 'localhost'])
+        if (!(loopbackHosts.has(configuredUrl.hostname) && !loopbackHosts.has(currentHost))) {
+          return configured
+        }
+      } catch (error) {
+        return configured
+      }
+    }
+
+    return `${currentProtocol}//${currentHost}:31471`
+  }
+
+  return configured || 'http://127.0.0.1:31471'
+}
+
+const API_BASE = resolveApiBase()
 
 function withApiBase(path) {
   return `${API_BASE}${path}`
