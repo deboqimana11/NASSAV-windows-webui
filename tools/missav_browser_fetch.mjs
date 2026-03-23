@@ -37,11 +37,34 @@ if (proxyServer) {
 const context = await chromium.launchPersistentContext(userDataDir, launchOptions);
 const page = context.pages()[0] || await context.newPage();
 
-const getHtml = async () => await page.content();
-const isChallenge = async () => (await page.title()).toLowerCase().includes('just a moment');
+const safePageTitle = async () => {
+  try {
+    return await page.title();
+  } catch (error) {
+    if ((error?.message || '').includes('Execution context was destroyed')) {
+      await page.waitForLoadState('domcontentloaded').catch(() => {});
+      return await page.title().catch(() => '');
+    }
+    return '';
+  }
+};
+
+const getHtml = async () => {
+  try {
+    return await page.content();
+  } catch (error) {
+    if ((error?.message || '').includes('Execution context was destroyed')) {
+      await page.waitForLoadState('domcontentloaded').catch(() => {});
+      return await page.content().catch(() => '');
+    }
+    return '';
+  }
+};
+
+const isChallenge = async () => (await safePageTitle()).toLowerCase().includes('just a moment');
 const isPlayableDetail = async () => {
   const html = await getHtml();
-  const title = await page.title();
+  const title = await safePageTitle();
   if (title.includes('404') || html.includes('找不到页面')) return false;
   if (html.includes('og:title') && !html.includes('MissAV | 免费高清AV在线看')) {
     return true;

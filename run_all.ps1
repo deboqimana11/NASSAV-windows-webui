@@ -13,6 +13,15 @@ if (-not (Test-Path $backendExe)) {
 }
 
 $env:NASSAV_SERVER_PORT = "$ApiPort"
+
+$playwrightModule = Join-Path $PSScriptRoot 'node_modules\playwright'
+if (-not (Test-Path $playwrightModule)) {
+  Write-Host '首次检测到缺少 Playwright，正在安装根目录依赖...'
+  Set-Location $PSScriptRoot
+  npm install
+  npx playwright install chromium
+}
+
 $backendJob = Start-Job -ScriptBlock {
   param($projectRoot, $port)
   Set-Location $projectRoot
