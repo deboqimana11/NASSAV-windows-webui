@@ -293,28 +293,14 @@ func buildVideoListCache() error {
 		return dirs[i].info.ModTime().After(dirs[j].info.ModTime())
 	})
 
-	validCount := 0
-	for _, dir := range dirs {
-		posterPath := filepath.Join(mediaPath, dir.entry.Name(), dir.entry.Name()+"-poster.jpg")
-		if _, err := os.Stat(posterPath); err == nil {
-			validCount++
-		}
-	}
-
-	if validCount == len(videoListCache) {
-		logger.Printf("Cache unchanged. Valid items: %d", validCount)
-		return nil
-	}
-
 	videoListCache = nil
 
 	var count int
 	for _, dir := range dirs {
 		videoID := dir.entry.Name()
-		posterPath := filepath.Join(mediaPath, videoID, videoID+"-poster.jpg")
 
-		if _, err := os.Stat(posterPath); err != nil {
-			logger.Printf("Poster not found for %s: %v", videoID, err)
+		if !hasDisplayableArtifacts(videoID) {
+			logger.Printf("Skipping %s because neither mp4 nor nfo exists", videoID)
 			continue
 		}
 
@@ -327,13 +313,56 @@ func buildVideoListCache() error {
 		videoListCache = append(videoListCache, VideoItem{
 			ID:     videoID,
 			Title:  title,
-			Poster: fmt.Sprintf("/file/%s/%s-poster.jpg", videoID, videoID),
+			Poster: posterURL(videoID),
 		})
 		count++
 	}
 
 	logger.Printf("Cache built successfully. Items: %d, Duration: %v", count, time.Since(startTime))
 	return nil
+}
+
+func posterURL(videoID string) string {
+	posterPath := filepath.Join(mediaPath, videoID, videoID+"-poster.jpg")
+	if _, err := os.Stat(posterPath); err == nil {
+		return fmt.Sprintf("/file/%s/%s-poster.jpg", videoID, videoID)
+	}
+	return ""
+}
+
+func hasDisplayableArtifacts(videoID string) bool {
+	videoDir := filepath.Join(mediaPath, videoID)
+	mp4Path := filepath.Join(videoDir, videoID+".mp4")
+	nfoPath := filepath.Join(videoDir, videoID+".nfo")
+
+	if _, err := os.Stat(mp4Path); err == nil {
+		return true
+	}
+	if _, err := os.Stat(nfoPath); err == nil {
+		return true
+	}
+	return false
+}
+
+func needsMetadataRepair(videoID string) bool {
+	videoDir := filepath.Join(mediaPath, videoID)
+	posterPath := filepath.Join(videoDir, videoID+"-poster.jpg")
+	metadataPath := filepath.Join(videoDir, "metadata.json")
+	nfoPath := filepath.Join(videoDir, videoID+".nfo")
+
+	if !hasDisplayableArtifacts(videoID) {
+		return false
+	}
+	if _, err := os.Stat(posterPath); err != nil {
+		return true
+	}
+	if _, err := os.Stat(metadataPath); err != nil {
+		return true
+	}
+	if _, err := os.Stat(nfoPath); err != nil {
+		return true
+	}
+	return false
 }
 
 func parseTitleAndDate(videoID string) (title, releaseDate string, err error) {
@@ -592,8 +621,28 @@ func addVideoHandler(w http.ResponseWriter, r *http.Request) {
 		logger.Printf("Fallback artifact check for %s: %v", id, exists)
 	}
 
+	hasArtifacts := checkVideoArtifacts(id)
+	if exists && !hasArtifacts {
+		deleteDownloadRecord(db, id)
+		exists = false
+	}
+
+	shouldRepair := exists && needsMetadataRepair(id)
 	response := fmt.Sprintf("%s already downloaded", id)
-	if !exists {
+	if shouldRepair {
+		response = fmt.Sprintf("Repair metadata for %s", id)
+		go func() {
+			cmd := exec.Command(pythonCmd, "repair_video.py", id)
+			cmd.Dir = projectRoot
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				logger.Printf("repair command exec failed: %v", err)
+			} else {
+				logger.Printf("repair command exec succ")
+			}
+		}()
+	} else if !exists {
 		response = fmt.Sprintf("Add %s to download queue", id)
 		go func() {
 			cmd := exec.Command(pythonCmd, "main.py", id)
@@ -624,6 +673,23 @@ func checkStringExists(db *sql.DB, target string) (bool, error) {
 	return exists, err
 }
 
+func deleteDownloadRecord(db *sql.DB, target string) bool {
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS MissAV (bvid TEXT PRIMARY KEY)"); err != nil {
+		logger.Printf("Ensure table before delete failed: %v", err)
+		return false
+	}
+
+	result, err := db.Exec("DELETE FROM MissAV WHERE bvid = ?", target)
+	if err != nil {
+		logger.Printf("Delete stale DB record failed for %s: %v", target, err)
+		return false
+	}
+	rows, err := result.RowsAffected()
+	if err == nil && rows > 0 {
+		logger.Printf("Deleted stale DB record for %s", target)
+	}
+	return true
+}
 func ensureDownloadTable(dbPath string) error {
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -722,4 +788,3 @@ func httpError(w http.ResponseWriter, message string, code int) {
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
-

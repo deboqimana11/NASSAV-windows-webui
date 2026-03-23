@@ -12,7 +12,7 @@ export default {
     const response = await axios.get(withApiBase('/api/videos'))
     return response.data.map((video) => ({
       ...video,
-      poster: withApiBase(video.poster)
+      poster: video.poster ? withApiBase(video.poster) : null
     }))
   },
 
@@ -57,3 +57,4 @@ export default {
     }
   }
 }
+

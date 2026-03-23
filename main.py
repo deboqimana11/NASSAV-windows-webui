@@ -42,8 +42,13 @@ if __name__ == "__main__":
     Path(work_path).touch(exist_ok=True)
 
     if not args.force and data.find_in_db(avid, downloaded_path, "MissAV"):
-        logger.info(f"{avid} 已在小姐姐数据库中")
-        sys.exit(0)
+        video_dir = Path(save_path) / avid
+        has_local_artifacts = (video_dir / f"{avid}.mp4").exists() or (video_dir / f"{avid}.nfo").exists()
+        if has_local_artifacts:
+            logger.info(f"{avid} 已在小姐姐数据库中，且本地文件存在")
+            sys.exit(0)
+        data.delete_from_db(avid, downloaded_path, "MissAV")
+        logger.warning(f"{avid} 数据库中存在，但本地文件缺失，已清理脏记录并继续重新下载")
 
     logger.info(f"开始执行 车牌号: {avid}")
 
@@ -103,3 +108,6 @@ if __name__ == "__main__":
     finally:
         with open(work_path, 'w', encoding='utf-8') as f:
             f.write("0")
+
+
+
