@@ -120,6 +120,9 @@ class Sracper:
         if not metadata:
             return None
 
+        if source == 'jable':
+            self._enrich_jable_metadata(metadata)
+
         if not metadata.release_date:
             metadata.release_date = self._resolve_release_date(metadata.avid, html, source)
 
@@ -256,6 +259,40 @@ class Sracper:
             logger.error(f"Jable 本地页面解析失败: {e}")
             return None
 
+    def _fetch_javbus_metadata(self, avid: str) -> Optional[AVMetadata]:
+        candidate_domains = []
+        for domain in [self.domain, *scraper_domains]:
+            if domain and domain not in candidate_domains:
+                candidate_domains.append(domain)
+
+        for domain in candidate_domains:
+            html = self._fetch_html(f'https://{domain}/{avid}', referer=f'https://{domain}/')
+            if not html:
+                continue
+            metadata = self._extract_javbus(html)
+            if metadata:
+                logger.info(f'通过 {domain} 获取 JavBus 大图剧照: {avid} ({len(metadata.fanarts)} 张)')
+                return metadata
+        return None
+
+    def _enrich_jable_metadata(self, metadata: AVMetadata) -> None:
+        if metadata.source != 'jable':
+            return
+        if metadata.release_date and metadata.fanarts:
+            return
+
+        fallback = self._fetch_javbus_metadata(metadata.avid)
+        if not fallback:
+            return
+
+        if not metadata.release_date and fallback.release_date:
+            metadata.release_date = fallback.release_date
+        if fallback.fanarts:
+            metadata.fanarts = fallback.fanarts
+        if not metadata.description and fallback.description:
+            metadata.description = fallback.description
+        if not metadata.keywords and fallback.keywords:
+            metadata.keywords = fallback.keywords
     def _extract_release_date_from_text(self, text: str) -> str:
         patterns = [
             r'<meta property="og:video:release_date" content="([^\"]+)"',
@@ -297,9 +334,20 @@ class Sracper:
                 return bus_date
         return ''
 
+    def _cleanup_existing_fanarts(self, metadata: AVMetadata) -> None:
+        video_dir = Path(self.path) / metadata.avid
+        pattern = re.compile(rf'^{re.escape(metadata.avid)}-fanart-\d+\.jpg$')
+        for file in video_dir.iterdir():
+            if not file.is_file() or not pattern.match(file.name):
+                continue
+            try:
+                file.unlink()
+            except Exception as e:
+                logger.warning(f'删除旧 fanart 失败: {file} {e}')
     def downloadIMG(self, metadata: AVMetadata) -> bool:
         prefix = metadata.avid + '-'
         fanart_count = 1
+        self._cleanup_existing_fanarts(metadata)
         referer = f'https://missav.ws/cn/{metadata.avid.lower()}' if metadata.source == 'missav' else f'https://jable.tv/videos/{metadata.avid.lower()}/'
 
         if self._download_file(metadata.cover, metadata.avid + '/' + prefix + f'fanart-{fanart_count}.jpg', referer=referer):
@@ -308,7 +356,7 @@ class Sracper:
             logger.error(f"封面下载失败：{metadata.cover}")
             return False
 
-        if metadata.source == 'jable' and metadata.sprite_vtt and metadata.sprite_image:
+        if metadata.source == 'jable' and metadata.sprite_vtt and metadata.sprite_image and not metadata.fanarts:
             extracted = self._download_jable_sprite_fanarts(metadata)
             logger.info(f'Jable 缩略图切出 fanart: {extracted}')
         else:
@@ -506,6 +554,9 @@ class Sracper:
         cropped_img = img.crop((left, top, right, bottom))
         cropped_img.save(os.path.join(self.path, optname))
         logger.debug(f'裁剪完成，尺寸: {cropped_img.size}')
+
+
+
 
 
 
