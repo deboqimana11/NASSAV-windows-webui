@@ -14,7 +14,7 @@
           :alt="'剧照 ' + (index + 1)"
           loading="lazy"
         >
-        <span class="gallery-index">{{ String(index + 1).padStart(2, '0') }}</span>
+
       </button>
     </div>
 
@@ -174,16 +174,6 @@ export default {
   object-fit: cover;
 }
 
-.gallery-index {
-  position: absolute;
-  left: 0.8rem;
-  bottom: 0.7rem;
-  z-index: 1;
-  color: rgba(236, 229, 219, 0.9);
-  font-family: 'Bebas Neue', 'Oswald', 'Microsoft YaHei', sans-serif;
-  font-size: 1.05rem;
-  letter-spacing: 0.08em;
-}
 
 .gallery-empty {
   display: grid;
@@ -392,3 +382,4 @@ export default {
   }
 }
 </style>
+
