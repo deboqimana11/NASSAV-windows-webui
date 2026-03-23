@@ -95,36 +95,34 @@ class Sracper:
     def scrape(self, avid: str) -> Optional[AVMetadata]:
         avid = avid.upper()
         local_html = Path(self.path) / avid / f"{avid}.html"
-        html = None
+        metadata = None
         source = 'javbus'
 
         if local_html.exists():
             html = local_html.read_text(encoding='utf-8', errors='ignore')
             source = self._detect_local_source(html)
             logger.info(f'使用本地页面刮削: {local_html} ({source})')
-        else:
-            url = f"https://{self.domain}/{avid}"
-            logger.info(url)
-            html = self._fetch_html(url, referer=f"https://{self.domain}/")
-            if html is None:
-                return None
-            logger.info("fetch html succ")
 
-        if source == 'missav':
-            metadata = self._extract_missav(html, avid)
-        elif source == 'jable':
-            metadata = self._extract_jable_local(html, avid)
-        else:
-            metadata = self._extract_javbus(html)
+            if source == 'missav':
+                metadata = self._extract_missav(html, avid)
+            elif source == 'jable':
+                metadata = self._extract_jable_local(html, avid)
+            else:
+                metadata = self._extract_javbus(html)
+
+            if metadata:
+                if source == 'jable':
+                    self._enrich_jable_metadata(metadata)
+
+                if not metadata.release_date:
+                    metadata.release_date = self._resolve_release_date(metadata.avid, html, source)
+            else:
+                logger.warning(f'本地页面解析失败，改为远程补抓: {avid}')
 
         if not metadata:
-            return None
-
-        if source == 'jable':
-            self._enrich_jable_metadata(metadata)
-
-        if not metadata.release_date:
-            metadata.release_date = self._resolve_release_date(metadata.avid, html, source)
+            metadata = self._fetch_javbus_metadata(avid)
+            if not metadata:
+                return None
 
         logger.info(f"parse metadata succ: \n{metadata}")
 
@@ -349,18 +347,35 @@ class Sracper:
         fanart_count = 1
         self._cleanup_existing_fanarts(metadata)
         referer = f'https://missav.ws/cn/{metadata.avid.lower()}' if metadata.source == 'missav' else f'https://jable.tv/videos/{metadata.avid.lower()}/'
+        remaining_fanarts = list(metadata.fanarts or [])
 
-        if self._download_file(metadata.cover, metadata.avid + '/' + prefix + f'fanart-{fanart_count}.jpg', referer=referer):
-            self._crop_img(metadata.avid + '/' + prefix + f'fanart-{fanart_count}.jpg', metadata.avid + '/' + prefix + 'poster.jpg')
-        else:
+        cover_targets = []
+        if metadata.cover:
+            cover_targets.append(metadata.cover)
+        if remaining_fanarts:
+            cover_targets.append(remaining_fanarts[0])
+
+        cover_downloaded = False
+        for index, image_url in enumerate(cover_targets):
+            if not image_url:
+                continue
+            if self._download_file(image_url, metadata.avid + '/' + prefix + f'fanart-{fanart_count}.jpg', referer=referer):
+                self._crop_img(metadata.avid + '/' + prefix + f'fanart-{fanart_count}.jpg', metadata.avid + '/' + prefix + 'poster.jpg')
+                cover_downloaded = True
+                if index > 0 and remaining_fanarts:
+                    remaining_fanarts = remaining_fanarts[1:]
+                    logger.warning(f'封面下载失败，已使用首张样品图兜底: {metadata.avid}')
+                break
+
+        if not cover_downloaded:
             logger.error(f"封面下载失败：{metadata.cover}")
             return False
 
-        if metadata.source == 'jable' and metadata.sprite_vtt and metadata.sprite_image and not metadata.fanarts:
+        if metadata.source == 'jable' and metadata.sprite_vtt and metadata.sprite_image and not remaining_fanarts:
             extracted = self._download_jable_sprite_fanarts(metadata)
             logger.info(f'Jable 缩略图切出 fanart: {extracted}')
         else:
-            for fanart in metadata.fanarts:
+            for fanart in remaining_fanarts:
                 fanart_count += 1
                 self._download_file(fanart, metadata.avid + '/' + prefix + f'fanart-{fanart_count}.jpg', referer=referer)
 
@@ -554,6 +569,8 @@ class Sracper:
         cropped_img = img.crop((left, top, right, bottom))
         cropped_img.save(os.path.join(self.path, optname))
         logger.debug(f'裁剪完成，尺寸: {cropped_img.size}')
+
+
 
 
 
