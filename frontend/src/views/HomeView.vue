@@ -89,11 +89,26 @@
         />
       </section>
 
-      <div v-if="totalPages > 1" class="pagination">
-        <button class="page-button" @click="goToPrevPage" :disabled="currentPage === 1">上一页</button>
-        <span class="page-summary">第 {{ currentPage }} / {{ totalPages }} 页</span>
-        <button class="page-button" @click="goToNextPage" :disabled="currentPage === totalPages">下一页</button>
-      </div>
+      <nav v-if="totalPages > 1" class="pagination" aria-label="分页导航">
+        <button class="page-nav" @click="goToPrevPage" :disabled="currentPage === 1" aria-label="上一页">
+          <span aria-hidden="true">&#8249;</span>
+        </button>
+
+        <button
+          v-for="item in pageItems"
+          :key="item.key"
+          class="page-chip"
+          :class="{ 'page-chip-active': item.page === currentPage, 'page-chip-ellipsis': item.type === 'ellipsis' }"
+          :disabled="item.type === 'ellipsis'"
+          @click="item.page && goToPage(item.page)"
+        >
+          {{ item.label }}
+        </button>
+
+        <button class="page-nav" @click="goToNextPage" :disabled="currentPage === totalPages" aria-label="下一页">
+          <span aria-hidden="true">&#8250;</span>
+        </button>
+      </nav>
     </template>
   </div>
 </template>
@@ -165,6 +180,44 @@ export default {
     },
     totalPages() {
       return Math.max(1, Math.ceil(this.videos.length / PAGE_SIZE))
+    },
+    pageItems() {
+      const total = this.totalPages
+      const current = this.currentPage
+      if (total <= 9) {
+        return Array.from({ length: total }, (_, index) => ({
+          key: `page-${index + 1}`,
+          label: String(index + 1),
+          page: index + 1,
+          type: 'page'
+        }))
+      }
+
+      const pages = new Set([1, 2, total - 1, total, current - 1, current, current + 1])
+      const normalized = Array.from(pages)
+        .filter((page) => page >= 1 && page <= total)
+        .sort((a, b) => a - b)
+
+      const items = []
+      let previous = 0
+      for (const page of normalized) {
+        if (previous && page - previous > 1) {
+          items.push({
+            key: `ellipsis-${previous}-${page}`,
+            label: '...',
+            page: null,
+            type: 'ellipsis'
+          })
+        }
+        items.push({
+          key: `page-${page}`,
+          label: String(page),
+          page,
+          type: 'page'
+        })
+        previous = page
+      }
+      return items
     },
     paginatedVideos() {
       const start = (this.currentPage - 1) * PAGE_SIZE
@@ -350,16 +403,21 @@ export default {
     navigateToDetail(id) {
       this.$router.push({ name: 'detail', params: { id } })
     },
+    goToPage(page) {
+      if (page === this.currentPage || page < 1 || page > this.totalPages) {
+        return
+      }
+      this.currentPage = page
+      window.scrollTo({ top: 0, behavior: 'auto' })
+    },
     goToPrevPage() {
       if (this.currentPage > 1) {
-        this.currentPage -= 1
-        window.scrollTo({ top: 0, behavior: 'auto' })
+        this.goToPage(this.currentPage - 1)
       }
     },
     goToNextPage() {
       if (this.currentPage < this.totalPages) {
-        this.currentPage += 1
-        window.scrollTo({ top: 0, behavior: 'auto' })
+        this.goToPage(this.currentPage + 1)
       }
     }
   }
@@ -666,32 +724,63 @@ export default {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 0.9rem;
-  margin-top: 0.85rem;
-  padding-top: 0.4rem;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 1.05rem;
+  padding-top: 0.55rem;
 }
 
-.page-button {
-  min-width: 92px;
-  height: 2.65rem;
-  padding: 0 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(230, 223, 213, 0.88);
+.page-nav,
+.page-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.5rem;
+  height: 2.5rem;
+  padding: 0 0.78rem;
+  border: none;
+  border-radius: 0.82rem;
+  background: transparent;
+  color: rgba(230, 223, 213, 0.72);
+  font-size: 0.95rem;
   font-weight: 700;
   cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
 }
 
-.page-button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+.page-nav:hover:not(:disabled),
+.page-chip:hover:not(:disabled) {
+  color: rgba(236, 229, 219, 0.9);
+  background: rgba(255, 255, 255, 0.06);
 }
 
-.page-summary {
-  color: var(--text-soft);
-  font-size: 0.9rem;
-  font-weight: 700;
+.page-nav:disabled,
+.page-chip:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.page-chip-active {
+  background: linear-gradient(135deg, #e61d2b 0%, #9d0615 100%);
+  color: #fff7fb;
+  box-shadow: 0 10px 24px rgba(211, 31, 43, 0.24);
+}
+
+.page-chip-active:hover:not(:disabled) {
+  background: linear-gradient(135deg, #e61d2b 0%, #9d0615 100%);
+  color: #fff7fb;
+  transform: translateY(-1px);
+}
+
+.page-chip-ellipsis {
+  min-width: 2.1rem;
+  padding: 0 0.3rem;
+  background: transparent;
+}
+
+.page-nav {
+  font-size: 1.25rem;
+  line-height: 1;
 }
 
 @media (max-width: 1040px) {
@@ -745,3 +834,5 @@ export default {
   }
 }
 </style>
+
+
