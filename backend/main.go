@@ -29,18 +29,23 @@ type AppConfig struct {
 }
 
 var (
-	videoListCache []VideoItem
-	cacheMutex     sync.RWMutex
-	logger         = log.New(os.Stdout, "[NASSAV] ", log.LstdFlags|log.Lshortfile)
-	projectRoot    string
-	mediaPath      string
-	databasePath   string
-	queueFilePath  string
-	workFilePath   string
-	serverPort     string
-	apiKey         string
-	pythonCmd      string
+	videoListCache          []VideoItem
+	videoListCacheBuiltAt   time.Time
+	cacheMutex              sync.RWMutex
+	videoListRefreshMutex   sync.Mutex
+	videoListRefreshRunning bool
+	logger                  = log.New(os.Stdout, "[NASSAV] ", log.LstdFlags|log.Lshortfile)
+	projectRoot             string
+	mediaPath               string
+	databasePath            string
+	queueFilePath           string
+	workFilePath            string
+	serverPort              string
+	apiKey                  string
+	pythonCmd               string
 )
+
+const videoListCacheTTL = 5 * time.Second
 
 type VideoItem struct {
 	ID     string `json:"id"`
@@ -270,9 +275,6 @@ func startCacheUpdater(interval time.Duration) {
 }
 
 func buildVideoListCache() error {
-	cacheMutex.Lock()
-	defer cacheMutex.Unlock()
-
 	startTime := time.Now()
 	logger.Println("Building video list cache...")
 
@@ -304,9 +306,7 @@ func buildVideoListCache() error {
 		return dirs[i].info.ModTime().After(dirs[j].info.ModTime())
 	})
 
-	videoListCache = nil
-
-	var count int
+	items := make([]VideoItem, 0, len(dirs))
 	for _, dir := range dirs {
 		videoID := dir.entry.Name()
 
@@ -321,16 +321,57 @@ func buildVideoListCache() error {
 			title = videoID
 		}
 
-		videoListCache = append(videoListCache, VideoItem{
+		items = append(items, VideoItem{
 			ID:     videoID,
 			Title:  title,
 			Poster: posterURL(videoID),
 		})
-		count++
 	}
 
-	logger.Printf("Cache built successfully. Items: %d, Duration: %v", count, time.Since(startTime))
+	cacheMutex.Lock()
+	videoListCache = items
+	videoListCacheBuiltAt = time.Now()
+	cacheMutex.Unlock()
+
+	logger.Printf("Cache built successfully. Items: %d, Duration: %v", len(items), time.Since(startTime))
 	return nil
+}
+
+func getVideoListSnapshot() ([]VideoItem, time.Time) {
+	cacheMutex.RLock()
+	defer cacheMutex.RUnlock()
+
+	items := append([]VideoItem(nil), videoListCache...)
+	return items, videoListCacheBuiltAt
+}
+
+func isVideoListCacheStale(builtAt time.Time) bool {
+	if builtAt.IsZero() {
+		return true
+	}
+	return time.Since(builtAt) >= videoListCacheTTL
+}
+
+func triggerVideoListRefresh() {
+	videoListRefreshMutex.Lock()
+	if videoListRefreshRunning {
+		videoListRefreshMutex.Unlock()
+		return
+	}
+	videoListRefreshRunning = true
+	videoListRefreshMutex.Unlock()
+
+	go func() {
+		defer func() {
+			videoListRefreshMutex.Lock()
+			videoListRefreshRunning = false
+			videoListRefreshMutex.Unlock()
+		}()
+
+		if err := buildVideoListCache(); err != nil {
+			logger.Printf("Async cache refresh failed: %v", err)
+		}
+	}()
 }
 
 func posterURL(videoID string) string {
@@ -412,15 +453,19 @@ func listVideosHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := buildVideoListCache(); err != nil {
-		logger.Printf("List request cache refresh failed: %v", err)
+	items, builtAt := getVideoListSnapshot()
+	if len(items) == 0 {
+		if err := buildVideoListCache(); err != nil {
+			logger.Printf("Initial list cache build failed: %v", err)
+		} else {
+			items, builtAt = getVideoListSnapshot()
+		}
+	} else if isVideoListCacheStale(builtAt) {
+		triggerVideoListRefresh()
 	}
 
-	cacheMutex.RLock()
-	defer cacheMutex.RUnlock()
-
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if err := json.NewEncoder(w).Encode(videoListCache); err != nil {
+	if err := json.NewEncoder(w).Encode(items); err != nil {
 		logger.Printf("Error encoding video list: %v", err)
 		httpError(w, "Internal server error", http.StatusInternalServerError)
 	}
