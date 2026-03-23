@@ -138,6 +138,6 @@ cfg/configs.json
 .browser-profile/
 videos/
 work
-backend/main.exe
 backend/main
 db/download_queue.txt
+

@@ -1,10 +1,10 @@
-# NASSAV
+# NASSAV-windows-webui
 
-NASSAV 是一个在 Windows 本机运行的多源视频下载、刮削和本地 Web UI 浏览工具。
+NASSAV-windows-webui 是一个面向 Windows 本机使用的多源视频下载、刮削和本地 Web UI 浏览工具。
 
 这份 README 的目标很直接：
 
-- 第一次打开仓库就知道怎么启动
+- GitHub 下载或克隆后，尽量直接启动
 - 第一次下载就知道该点哪里
 - 出问题时知道先查什么
 
@@ -48,9 +48,9 @@ NASSAV 是一个在 Windows 本机运行的多源视频下载、刮削和本地 
 - `queue_runner.py`
   消费下载队列
 - `cfg/configs.json`
-  本机真实配置文件
+  本机真实配置文件，首次启动会自动生成
 - `cfg/configs.json.example`
-  配置模板，应该提交到 GitHub 的是它
+  配置模板，提交到 GitHub 的是它
 
 ---
 
@@ -59,9 +59,11 @@ NASSAV 是一个在 Windows 本机运行的多源视频下载、刮削和本地 
 ### 3.1 克隆项目
 
 ```powershell
-git clone https://github.com/Satoing/NASSAV.git
-cd NASSAV
+git clone https://github.com/deboqimana11/NASSAV-windows-webui.git
+cd NASSAV-windows-webui
 ```
+
+如果你是直接在 GitHub 页面点 `Download ZIP`，解压后进入仓库根目录即可。
 
 ### 3.2 安装依赖
 
@@ -75,14 +77,15 @@ npx playwright install chromium
 
 - `npm install` 是在项目根目录执行，不是在 `frontend` 目录
 - Playwright 是 MissAV 浏览器回退必须依赖
+- 只有当仓库里缺少 `backend/main.exe` 时，才需要本机安装 Go 作为自动编译兜底
 
-### 3.3 复制配置模板
+### 3.3 首次启动会自动生成配置
 
-```powershell
-Copy-Item cfg\configs.json.example cfg\configs.json
-```
+现在不需要手动复制 `cfg/configs.json.example` 了。
 
-然后打开 `cfg/configs.json`，至少检查这几个字段：
+首次双击 `run_all.bat` 或执行 `run_all.ps1` 时，如果发现 `cfg/configs.json` 不存在，脚本会自动生成 `cfg/configs.json`。
+
+首次启动后，打开 `cfg/configs.json`，至少检查这几个字段：
 
 ```json
 {
@@ -108,11 +111,21 @@ Copy-Item cfg\configs.json.example cfg\configs.json
 
 ### 3.4 启动 Web UI
 
-最简单：
+最简单：直接双击仓库根目录里的 `run_all.bat`。
+
+也可以命令行执行：
 
 ```bat
 run_all.bat
 ```
+
+启动脚本会自动做这些事：
+
+- 自动补齐 `cfg/configs.json`
+- 优先使用仓库自带的 `backend/main.exe`
+- 如果只有旧版 `backend/main`，会自动复制成 `main.exe`
+- 只有前两种都没有时，才回退到本机 Go 自动编译
+- 如果缺少 Playwright 依赖，会自动安装浏览器相关依赖
 
 启动后打开：
 
@@ -181,7 +194,7 @@ videos/
 ## 5. 目录结构
 
 ```text
-NASSAV/
+NASSAV-windows-webui/
 ├── backend/            # Go 后端服务
 ├── cfg/                # 配置文件
 ├── db/                 # sqlite 和下载队列
@@ -212,7 +225,10 @@ run_all.bat
 用途：
 
 - 从资源管理器直接双击
-- 自动调用 `run_all.ps1`
+- 自动补齐 `cfg/configs.json`
+- 优先使用仓库自带的 `backend/main.exe`
+- 如果只有旧版 `backend/main`，会自动复制成 `main.exe`
+- 最后才回退到本机 Go 自动编译
 
 ### 单窗口看日志
 
@@ -363,6 +379,7 @@ cfg/configs.json.example
   只留在本机，不要提交 GitHub
 - `cfg/configs.json.example`
   提交到仓库，给别人看结构和默认值
+- 普通使用者直接双击 `run_all.bat` 即可，脚本会自动生成真实配置文件
 
 原因：
 
@@ -372,6 +389,15 @@ cfg/configs.json.example
 ---
 
 ## 12. 常见问题
+
+### 为什么 GitHub 下载下来不能直接双击启动？
+
+当前版本已经补了自动启动兜底：
+
+- 不再要求你手动复制 `cfg/configs.json`
+- 脚本优先使用 `backend/main.exe`
+- 如果仓库里只有旧版 `backend/main`，会自动复制成 `main.exe`
+- 如果二进制都缺失，才会回退到本机 Go 编译
 
 ### 为什么 Web UI 里添加下载后，列表不会立即更新？
 
