@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -55,11 +56,21 @@ type VideoDetail struct {
 	VideoFile   string   `json:"videoFile,omitempty"`
 }
 
+type DownloadProgress struct {
+	Phase            string  `json:"phase"`
+	ProgressPercent  float64 `json:"progressPercent"`
+	SpeedBytesPerSec float64 `json:"speedBytesPerSec"`
+	DownloadedBytes  int64   `json:"downloadedBytes"`
+	EstimatedBytes   int64   `json:"estimatedBytes"`
+	UpdatedAt        int64   `json:"updatedAt"`
+}
+
 type DownloadStatus struct {
-	Active     bool     `json:"active"`
-	Current    string   `json:"current"`
-	Queue      []string `json:"queue"`
-	QueueCount int      `json:"queueCount"`
+	Active     bool              `json:"active"`
+	Current    string            `json:"current"`
+	Queue      []string          `json:"queue"`
+	QueueCount int               `json:"queueCount"`
+	Progress   *DownloadProgress `json:"progress,omitempty"`
 }
 
 type NfoFile struct {
@@ -522,6 +533,7 @@ func downloadStatusHandler(w http.ResponseWriter, r *http.Request) {
 		Current:    current,
 		Queue:      queue,
 		QueueCount: len(queue),
+		Progress:   readDownloadProgress(current),
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -713,6 +725,30 @@ func checkVideoArtifacts(videoID string) bool {
 		return true
 	}
 	return false
+}
+
+func readDownloadProgress(videoID string) *DownloadProgress {
+	if strings.TrimSpace(videoID) == "" {
+		return nil
+	}
+
+	progressPath := filepath.Join(mediaPath, videoID, "download_progress.json")
+	content, err := os.ReadFile(progressPath)
+	if err != nil {
+		return &DownloadProgress{Phase: "preparing", ProgressPercent: 0}
+	}
+
+	var progress DownloadProgress
+	if err := json.Unmarshal(content, &progress); err != nil {
+		logger.Printf("Read progress failed for %s: %v", videoID, err)
+		return &DownloadProgress{Phase: "preparing", ProgressPercent: 0}
+	}
+
+	progress.ProgressPercent = math.Max(0, math.Min(progress.ProgressPercent, 100))
+	if progress.Phase == "" {
+		progress.Phase = "downloading"
+	}
+	return &progress
 }
 
 func readCurrentWork(path string) string {

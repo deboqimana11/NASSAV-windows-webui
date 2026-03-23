@@ -15,9 +15,18 @@
     </div>
 
     <section class="status-strip">
-      <div class="status-item">
+      <div class="status-item status-item-download">
         <span class="status-name">下载中</span>
         <strong class="status-value">{{ downloadStatus.active ? downloadStatus.current : '空闲' }}</strong>
+        <div v-if="downloadStatus.active && downloadStatus.progress" class="download-progress">
+          <div class="download-progress-meta">
+            <span>{{ progressPhaseLabel }}</span>
+            <span>{{ progressSummary }}</span>
+          </div>
+          <div class="download-progress-bar">
+            <span class="download-progress-fill" :style="{ width: `${progressPercent}%` }"></span>
+          </div>
+        </div>
       </div>
       <div class="status-item">
         <span class="status-name">排队</span>
@@ -53,7 +62,8 @@
 import VideoCard from '../components/VideoCard.vue'
 import videosApi from '../api/videos'
 
-const POLL_INTERVAL_MS = 6000
+const ACTIVE_STATUS_POLL_MS = 2000
+const IDLE_STATUS_POLL_MS = 6000
 const PAGE_SIZE = 24
 
 export default {
@@ -73,7 +83,8 @@ export default {
       error: '',
       pollTimer: null,
       lastUpdatedAt: null,
-      currentPage: 1
+      currentPage: 1,
+      wasDownloadActive: false
     }
   },
   computed: {
@@ -89,10 +100,42 @@ export default {
     paginatedVideos() {
       const start = (this.currentPage - 1) * PAGE_SIZE
       return this.videos.slice(start, start + PAGE_SIZE)
+    },
+    progressPercent() {
+      return Math.max(2, Math.min(100, Number(this.downloadStatus.progress?.progressPercent || 0)))
+    },
+    progressPhaseLabel() {
+      const phase = this.downloadStatus.progress?.phase
+      if (phase === 'downloading') return '下载中'
+      if (phase === 'finalizing') return '封装中'
+      if (phase === 'completed') return '已完成'
+      if (phase === 'failed') return '下载失败'
+      return '准备中'
+    },
+    progressSummary() {
+      const progress = this.downloadStatus.progress
+      if (!progress) {
+        return ''
+      }
+
+      const parts = []
+      if (progress.estimatedBytes > 0) {
+        parts.push(`${Math.round(progress.progressPercent || 0)}%`)
+        parts.push(`${this.formatBytes(progress.downloadedBytes)} / ${this.formatBytes(progress.estimatedBytes)}`)
+      } else if (progress.downloadedBytes > 0) {
+        parts.push(this.formatBytes(progress.downloadedBytes))
+      }
+
+      if (progress.phase === 'downloading' && progress.speedBytesPerSec > 0) {
+        parts.push(this.formatSpeed(progress.speedBytesPerSec))
+      }
+
+      return parts.join(' · ')
     }
   },
   async created() {
     await this.refreshEverything()
+    this.wasDownloadActive = this.downloadStatus.active
     window.addEventListener('videos:refresh', this.handleExternalRefresh)
     document.addEventListener('visibilitychange', this.handleVisibilityChange)
     this.startPolling()
@@ -161,7 +204,8 @@ export default {
           active: false,
           current: '',
           queue: [],
-          queueCount: 0
+          queueCount: 0,
+          progress: null
         }
       }
     },
@@ -176,27 +220,65 @@ export default {
       if (this.pollTimer) {
         return
       }
-      this.pollTimer = window.setInterval(() => {
-        if (document.hidden) {
-          return
-        }
-        this.refreshEverything({ silent: true })
-      }, POLL_INTERVAL_MS)
+      this.scheduleNextPoll()
     },
     stopPolling() {
       if (!this.pollTimer) {
         return
       }
-      window.clearInterval(this.pollTimer)
+      window.clearTimeout(this.pollTimer)
       this.pollTimer = null
+    },
+    scheduleNextPoll() {
+      this.stopPolling()
+      const delay = this.downloadStatus.active ? ACTIVE_STATUS_POLL_MS : IDLE_STATUS_POLL_MS
+      this.pollTimer = window.setTimeout(() => {
+        this.pollDownloadStatus()
+      }, delay)
+    },
+    async pollDownloadStatus() {
+      if (document.hidden) {
+        this.scheduleNextPoll()
+        return
+      }
+
+      const previousCurrent = this.downloadStatus.current
+      const previousActive = this.downloadStatus.active
+      await this.loadStatus()
+
+      if ((previousActive && !this.downloadStatus.active) || previousCurrent !== this.downloadStatus.current) {
+        await this.loadVideos({ silent: true })
+      }
+
+      this.wasDownloadActive = this.downloadStatus.active
+      this.scheduleNextPoll()
     },
     handleVisibilityChange() {
       if (!document.hidden) {
         this.refreshEverything({ silent: true })
+        this.scheduleNextPoll()
       }
     },
     handleExternalRefresh() {
       this.refreshEverything({ silent: true })
+    },
+    formatBytes(bytes) {
+      const value = Number(bytes || 0)
+      if (!value) {
+        return '0 B'
+      }
+      const units = ['B', 'KB', 'MB', 'GB', 'TB']
+      let size = value
+      let unitIndex = 0
+      while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024
+        unitIndex += 1
+      }
+      const digits = unitIndex === 0 ? 0 : size >= 100 ? 0 : size >= 10 ? 1 : 2
+      return `${size.toFixed(digits)} ${units[unitIndex]}`
+    },
+    formatSpeed(bytesPerSec) {
+      return `${this.formatBytes(bytesPerSec)}/s`
     },
     navigateToDetail(id) {
       this.$router.push({ name: 'detail', params: { id } })
@@ -297,6 +379,12 @@ h1 {
   min-width: 0;
 }
 
+.status-item-download {
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: min(360px, 100%);
+}
+
 .status-name {
   color: #9c6671;
   font-size: 0.82rem;
@@ -329,6 +417,35 @@ h1 {
   color: #9f2944;
   font-size: 0.8rem;
   font-weight: 700;
+}
+
+.download-progress {
+  width: min(320px, 100%);
+  margin-top: 0.2rem;
+}
+
+.download-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  color: #8e6570;
+  font-size: 0.76rem;
+}
+
+.download-progress-bar {
+  position: relative;
+  height: 4px;
+  margin-top: 0.35rem;
+  border-radius: 999px;
+  background: rgba(191, 120, 134, 0.18);
+  overflow: hidden;
+}
+
+.download-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #c96376 0%, #8a2037 100%);
 }
 
 .status-card {
