@@ -35,9 +35,17 @@
     <div v-else-if="error" class="status-card status-error">{{ error }}</div>
     <div v-else-if="!videos.length" class="status-card">还没有视频，先在顶部添加一个车牌号试试。</div>
 
-    <div v-else class="video-grid">
-      <VideoCard v-for="video in videos" :key="video.id" :video="video" @click="navigateToDetail(video.id)" />
-    </div>
+    <template v-else>
+      <div class="video-grid">
+        <VideoCard v-for="video in paginatedVideos" :key="video.id" :video="video" @click="navigateToDetail(video.id)" />
+      </div>
+
+      <div v-if="totalPages > 1" class="pagination">
+        <button class="page-button" @click="goToPrevPage" :disabled="currentPage === 1">上一页</button>
+        <span class="page-summary">第 {{ currentPage }} / {{ totalPages }} 页</span>
+        <button class="page-button" @click="goToNextPage" :disabled="currentPage === totalPages">下一页</button>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -46,6 +54,7 @@ import VideoCard from '../components/VideoCard.vue'
 import videosApi from '../api/videos'
 
 const POLL_INTERVAL_MS = 6000
+const PAGE_SIZE = 24
 
 export default {
   name: 'HomeView',
@@ -63,7 +72,8 @@ export default {
       loading: false,
       error: '',
       pollTimer: null,
-      lastUpdatedAt: null
+      lastUpdatedAt: null,
+      currentPage: 1
     }
   },
   computed: {
@@ -72,6 +82,13 @@ export default {
         return '自动轮询开启'
       }
       return `更新于 ${this.lastUpdatedAt}`
+    },
+    totalPages() {
+      return Math.max(1, Math.ceil(this.videos.length / PAGE_SIZE))
+    },
+    paginatedVideos() {
+      const start = (this.currentPage - 1) * PAGE_SIZE
+      return this.videos.slice(start, start + PAGE_SIZE)
     }
   },
   async created() {
@@ -119,6 +136,9 @@ export default {
       try {
         const nextVideos = await videosApi.getVideoList()
         this.videos = nextVideos
+        if (this.currentPage > this.totalPages) {
+          this.currentPage = this.totalPages
+        }
         this.stampUpdatedAt()
         if (silent) {
           this.error = ''
@@ -180,6 +200,18 @@ export default {
     },
     navigateToDetail(id) {
       this.$router.push({ name: 'detail', params: { id } })
+    },
+    goToPrevPage() {
+      if (this.currentPage > 1) {
+        this.currentPage -= 1
+        window.scrollTo({ top: 0, behavior: 'auto' })
+      }
+    },
+    goToNextPage() {
+      if (this.currentPage < this.totalPages) {
+        this.currentPage += 1
+        window.scrollTo({ top: 0, behavior: 'auto' })
+      }
     }
   }
 }
@@ -319,6 +351,37 @@ h1 {
   padding: 0.2rem 0 0;
 }
 
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.9rem;
+  margin-top: 1.2rem;
+}
+
+.page-button {
+  min-width: 88px;
+  height: 38px;
+  padding: 0 0.95rem;
+  border: 1px solid #efc5ca;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #8a2037;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.page-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.page-summary {
+  color: #7f5660;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
 @media (max-width: 768px) {
   .hero {
     flex-direction: column;
@@ -350,6 +413,14 @@ h1 {
   .video-grid {
     grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
     gap: 14px;
+  }
+
+  .pagination {
+    gap: 0.65rem;
+  }
+
+  .page-button {
+    flex: 1;
   }
 }
 </style>
